@@ -11,6 +11,9 @@
 | 模型基礎 | Token 組成、Reasoning Effort、Prompt Cache、Context Window |
 | Agent 機制 | Tool／MCP／Skill、長任務記憶、Subagent、模型路由 |
 | 工程實踐 | 需求拆解、Code Review Skill、測試有效性、開發習慣 |
+| 延伸主題 | RAG 檢索、LLM 評測、Hooks、Prompt Injection 安全 |
+
+另有[名詞小辭典](glossary.html)。每一頁最下面都有「口試怎麼答」的 30 秒回答範例。
 
 ## 說明
 

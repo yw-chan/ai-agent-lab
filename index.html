@@ -30,6 +30,8 @@
 .qa h2 { margin: 0; font-family: var(--f-display); font-size: 1.25rem; }
 .qa p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
 .qa .go { font-family: var(--f-mono); color: var(--accent); white-space: nowrap; }
+.progress-line { font-size: 13px; color: var(--muted); }
+.card .seen { font-size: 11px; margin-left: 6px; vertical-align: middle; }
 .foot { padding-block: 16px 48px; }
 @media (max-width: 520px) { .hero h1 { font-size: 1.9rem; } .qa { grid-template-columns: minmax(0, 1fr); } }
 </style>
@@ -37,10 +39,11 @@
 <body>
 <header class="wrap hero">
   <h1>Agent 實驗室</h1>
-  <p>每一頁都是同一種玩法：左邊改你要送出的內容，右邊看到真正送給模型的 request、模型回傳的 response，還有 token、費用、上下文裡到底裝了什麼。題號對應課程版 11 題和面試版 16 題。</p>
+  <p>每一頁都是同一種玩法：左邊改你要送出的內容，右邊看到真正送給模型的 request、模型回傳的 response，還有 token、費用、上下文裡到底裝了什麼。題號對應課程版 11 題和面試版 21 題。</p>
   <div class="flowline" aria-label="一次呼叫的流程">
     <span class="in">你的輸入</span>→<span>Agent 組 request</span>→<span>遠端模型</span>→<span>tool_use</span>→<span>本機執行</span>→<span>tool_result</span>→<span class="out">回答</span>
   </div>
+  <p class="progress-line"><span id="progress">已看過 0 頁</span> ・ <a href="glossary.html">名詞小辭典</a></p>
 </header>
 
 <main class="wrap">
@@ -76,11 +79,36 @@
       <a class="card" href="habits.html"><div class="qref"><span>面試 14、15、16</span></div><h3>開發習慣</h3><p>commit 產生器和檢查，加上一套固定的開發流程，每一步對應 Claude Code 的做法。</p></a>
     </div>
   </section>
+
+  <section class="mod">
+    <h2>延伸主題</h2>
+    <p>AI 應用職缺常問、課程沒有的題目。</p>
+    <div class="grid">
+      <a class="card" href="rag.html"><div class="qref"><span>面試 17</span></div><h3>RAG 檢索</h3><p>調整切段大小和 top-k，看文件怎麼切、怎麼算相似度、最後組成什麼 prompt，以及跟「全部塞進去」比省多少。</p></a>
+      <a class="card" href="eval.html"><div class="qref"><span>面試 18</span></div><h3>LLM 評測</h3><p>用固定測試集評兩個版本的 prompt：多跑幾次看穩不穩、哪幾題變差、能不能上線。</p></a>
+      <a class="card" href="hooks.html"><div class="qref"><span>課程 6</span><span>面試 7</span></div><h3>Hooks</h3><p>設定 PreToolUse、PostToolUse hook，重播一串 Agent 動作，看哪些被擋下、哪些自動檢查。</p></a>
+      <a class="card" href="security.html"><div class="qref"><span>面試 20</span></div><h3>Prompt Injection 安全</h3><p>讀進來的網頁或 issue 藏了惡意指令，一層一層開防護，看最後會不會出事。</p></a>
+    </div>
+  </section>
 </main>
 
 <footer class="wrap foot">
   <p class="disclaimer">所有 token、費用、延遲都是教學用的估算，不是真實的 tokenizer 或價目表；API 欄位以官方文件為準。</p>
 </footer>
 
+<script src="common.js"></script>
+<script>
+(function () {
+  const seen = Lab.store.get('visited', {});
+  const cards = Lab.$$('a.card[href]');
+  let n = 0;
+  cards.forEach(c => {
+    if (!seen[c.getAttribute('href')]) return;
+    n++;
+    c.querySelector('h3').insertAdjacentHTML('beforeend', '<span class="chip ok seen">✓ 看過</span>');
+  });
+  Lab.$('#progress').textContent = `已看過 ${n} / ${cards.length} 頁`;
+})();
+</script>
 </body>
 </html>

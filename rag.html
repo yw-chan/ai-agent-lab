@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>RAG 檢索實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .seg-ctl.wrap-seg { display: flex; flex-wrap: wrap; }
+  .seg-ctl.wrap-seg button { flex: 1 1 auto; text-align: left; }
+  .docs { display: grid; gap: 10px; }
+  .docs textarea { min-height: 78px; font-size: 13px; }
+  .st { display: grid; gap: 6px; min-width: 0; }
+  .st h3 { margin: 0; font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .st h3 .no { font-family: var(--f-mono); color: var(--accent); }
+  .st h3 .sub { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .scroll { max-height: 250px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: grid; gap: 4px; align-content: start; }
+  .ck { border-left: 3px dashed var(--line); padding: 4px 8px; font-size: 12.5px; background: var(--surface-2); border-radius: 0 6px 6px 0; overflow-wrap: anywhere; }
+  .ck b { font-family: var(--f-mono); font-size: 12px; }
+  .ck .tk { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); margin-left: 6px; }
+  .ck .ov { background: var(--warn-soft); border-radius: 3px; }
+  .ck.full { border-left: 3px solid var(--ok); background: var(--ok-soft); }
+  .ck.part { border-left: 3px solid var(--warn); background: var(--warn-soft); }
+  .ck.used { outline: 2px solid var(--accent); }
+  .vec { font-family: var(--f-mono); font-size: 12px; white-space: nowrap; }
+  .bar { display: inline-block; height: 8px; background: var(--accent); border-radius: 4px; vertical-align: middle; }
+  tr.pick td { background: var(--accent-soft); }
+  .dim-box { opacity: .55; }
+  .diag { display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>延伸 RAG</span></div>
+  <h1>RAG 檢索實驗</h1>
+  <p class="lede">RAG 的做法是先從知識庫找出和問題最相關的幾段文字，再把這幾段連同問題一起交給模型。左邊調整文件、切段大小、重疊和 top-k，右邊逐步看切段、向量化、排名、組好的請求和回答；切得太碎、top-k 太小或段落太大，都會看到哪裡出問題。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>知識庫與檢索設定</h2><span class="hint">修改後右邊即時更新</span></header>
+    <div class="body">
+      <div class="field">
+        <span class="label">內部文件（可直接修改內容）</span>
+        <div class="docs" id="docs"></div>
+        <div class="row"><button type="button" class="btn" id="reset-docs">還原文件內容</button></div>
+      </div>
+
+      <div class="field">
+        <label for="size">切段大小：<b id="size-v"></b> tokens</label>
+        <input type="range" id="size" min="20" max="200" step="5" value="70">
+        <span class="sub">太小會把一句完整的答案切開，太大會把不相關的內容一起帶進去。</span>
+      </div>
+      <div class="field">
+        <label for="ov">重疊：<b id="ov-v"></b> tokens</label>
+        <input type="range" id="ov" min="0" max="40" step="2" value="10">
+        <span class="sub">相鄰兩段重複一小截，降低答案剛好被切在邊界的機率。</span>
+      </div>
+      <div class="field">
+        <label for="topk">top-k（取最相關幾段）：<b id="topk-v"></b></label>
+        <input type="range" id="topk" min="1" max="5" step="1" value="3">
+      </div>
+
+      <div class="field">
+        <span class="label" id="pre-label">使用者問題（點選範例，或直接改文字）</span>
+        <div class="seg-ctl wrap-seg" id="presets" role="group" aria-labelledby="pre-label"></div>
+        <label class="sub" for="q">問題內容</label>
+        <textarea id="q" rows="2"></textarea>
+      </div>
+
+      <label class="check"><input type="checkbox" id="norag"> <span>不用 RAG：把全部文件塞進 context<br><span class="sub">對照組：看看 token、費用和可追溯性差多少。</span></span></label>
+
+      <p class="disclaimer">所有數字都是示意估算：token 依字數粗估，價格用示意單價（輸入 $3、輸出 $15，每百萬 token）；向量只有 8 維、相似度用中文雙字詞袋計算，只是為了教學。真實系統使用 embedding 模型與向量資料庫，維度通常是數百到數千。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>RAG 流程：從切段到回答</h2><span class="hint" id="hint"></span></header>
+    <div class="body">
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-rag">0</div><div class="l">送出 tokens（目前設定）</div></div>
+        <div class="stat"><div class="v" id="s-all">0</div><div class="l">全部文件塞進去</div></div>
+        <div class="stat"><div class="v" id="s-cost">$0</div><div class="l">這次費用（全塞：<span id="s-cost2"></span>）</div></div>
+        <div class="stat"><div class="v" id="s-found">-</div><div class="l">找對了嗎</div></div>
+      </div>
+      <div class="diag" id="diag"></div>
+
+      <div class="st">
+        <h3><span class="no">①</span>切段結果<span class="sub" id="ck-sub"></span></h3>
+        <div class="scroll" id="chunks" tabindex="0" aria-label="切段結果清單"></div>
+      </div>
+
+      <div class="st" id="box-vec">
+        <h3><span class="no">②</span>向量化（示意）<span class="sub">這裡只有 8 個數字；真實 embedding 有數百到數千維</span></h3>
+        <div class="scroll tbl" id="vecs" tabindex="0" aria-label="向量化結果"></div>
+      </div>
+
+      <div class="st" id="box-rank">
+        <h3><span class="no">③</span>相似度排名<span class="sub">問題向量和每段比對，取最高的 top-k</span></h3>
+        <div class="tbl" id="rank"></div>
+      </div>
+
+      <div class="st">
+        <h3><span class="no">④</span>組好的 prompt（實際送出的請求）</h3>
+        <div class="note" id="cache-note"></div>
+        <pre class="code" id="json" tabindex="0"></pre>
+      </div>
+
+      <div class="st">
+        <h3><span class="no">⑤</span>示意回答</h3>
+        <div class="note" id="answer"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li><strong>RAG ＝ 先找相關段落，再交給模型。</strong>流程是切段 → 向量化（存進向量資料庫）→ 用問題找最相近的幾段 → 把這幾段放進 prompt。</li>
+      <li><strong>不把全部文件塞進 context，是為了成本、品質和可追溯。</strong>文件一多根本塞不下；塞得下也貴，而且無關內容會干擾模型。</li>
+      <li><strong>切段大小與 top-k 都要調。</strong>切太小答案被切開、top-k 太小漏掉資訊、段落太大雜訊多又貴；要拿一批真實問題去測。</li>
+      <li><strong>回答要引用出處。</strong>每段都有編號，答案標出來源，使用者和你才能查證；檢索沒找到時，要讓模型說不知道，而不是硬編。</li>
+      <li>真實系統的相似度由 embedding 模型算語意距離，常再加關鍵字檢索與重排序；這頁用詞袋只是讓你看見原理。</li>
+    </ul>
+  </div>
+</section>
+
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">RAG 就是先從知識庫找出跟問題最相關的幾段文件，再連同問題一起交給模型回答。這樣不用把全部文件塞進 context，成本低、干擾少，而且每個答案都能指出出處。流程是把文件切段、用 embedding 模型轉成向量存進向量資料庫，查詢時把問題也轉成向量，取最相近的 top-k 段放進 prompt。調校重點是切段大小和 top-k，切太小答案會被切開，top-k 太小會漏資訊，所以我會用一批真實問題去量測召回率。</p><ul class="more"><li>被追問時可以補：切段常見做法是依段落或標題切，並保留一點重疊，避免答案剛好落在邊界。</li><li>被追問時可以補：純向量檢索對專有名詞、編號不一定準，實務上會混合關鍵字檢索，再用重排序模型挑最終的段落。</li><li>被追問時可以補：檢索內容每題都不同，放在 prompt 後半段；固定的 system 指示放最前面，才吃得到 prompt cache。</li><li>被追問時可以補：要評估檢索和回答兩段，檢索看有沒有撈到正確段落，回答看有沒有忠於檢索內容。</li></ul></div></section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="habits.html"><span>← 上一題</span><b>開發習慣</b></a><a class="pg next" href="eval.html"><span>下一題 →</span><b>LLM 評測</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { tokens, fmt, usd, esc, jsonHTML, cost, $, $$ } = Lab;
+
+const DOCS0 = [
+  { id: 'D1', title: '出庫作業 SOP', text: '出庫作業 SOP：業務建立出庫單後，倉管依揀貨清單備貨並掃描條碼確認，確認後系統即時扣減可用庫存。出庫單若在出貨前刪除，已扣減的庫存不會自動加回，須由倉管在庫存調整畫面執行回沖並填寫原因，主管核准後庫存才會恢復。已出貨的出庫單不可刪除，只能建立退貨單處理。' },
+  { id: 'D2', title: '庫存盤點規則', text: '庫存盤點規則：每月最後一個工作日進行全倉盤點，盤點期間暫停出入庫。盤盈盤虧超過百分之二須提交差異報告，由財務與倉管主管共同簽核後才能調整帳面庫存。高價值品項每週抽盤一次。' },
+  { id: 'D3', title: '請假辦法', text: '請假辦法：特休假須於三個工作天前在人事系統提出申請，病假可於當天補單並附上就醫證明。請假超過三天須由部門主管核准，核准後系統會自動通知代理人。' },
+  { id: 'D4', title: '系統權限說明', text: '系統權限說明：倉管角色可執行出庫確認與庫存調整，業務角色只能建立與查詢出庫單，不可修改庫存數量。新增權限須填寫權限申請單，由資訊部門於兩個工作天內開通。' },
+  { id: 'D5', title: '退貨處理流程', text: '退貨處理流程：客戶退貨須建立退貨單，倉管驗收品質後才能入庫。瑕疵品放入待處理區並通知品保，不得直接加回可用庫存。退貨入庫後三個工作天內完成退款。' }
+];
+const PRESETS = [
+  { q: '出庫單刪除後庫存要怎麼處理？', ans: '須由倉管在庫存調整畫面執行回沖並填寫原因，主管核准後庫存才會恢復', doc: 'D1' },
+  { q: '盤盈盤虧超過多少要提交差異報告？', ans: '盤盈盤虧超過百分之二須提交差異報告', doc: 'D2' },
+  { q: '病假要怎麼補單？', ans: '病假可於當天補單並附上就醫證明', doc: 'D3' }
+];
+const SYSTEM = '你是公司內部知識助理。只能根據 <documents> 內提供的內容回答，找不到就說不知道，並在答案後標註引用的段落編號，例如 [D1-c2]。';
+
+function readDocs() { return DOCS0.map((d, i) => ({ id: d.id, title: d.title, text: $('#doc-' + i).value })); }
+
+function chunkDoc(d, size, ov) {
+  const cp = Math.max(6, Math.floor(size / 1.2));
+  const o = Math.max(0, Math.min(Math.floor(ov / 1.2), cp - 3));
+  const step = cp - o, out = [], t = d.text;
+  for (let s = 0, n = 1; s < t.length; s += step, n++) {
+    const e = Math.min(t.length, s + cp);
+    out.push({ id: d.id + '-c' + n, doc: d.id, text: t.slice(s, e), ov: s > 0 ? Math.min(o, e - s) : 0 });
+    if (e >= t.length) break;
+  }
+  return out;
+}
+
+function grams(text) {
+  const cleaned = String(text).replace(/[的了是嗎呢要怎麼什在可以和與或及會有就都也]/g, ' ');
+  const segs = cleaned.match(/[一-鿿]+|[A-Za-z0-9]+/g) || [];
+  const out = [];
+  segs.forEach(s => {
+    if (/^[A-Za-z0-9]+$/.test(s)) { out.push(s.toLowerCase()); return; }
+    for (let i = 0; i + 1 < s.length; i++) out.push(s.slice(i, i + 2));
+  });
+  return out;
+}
+function tf(list) { const m = {}; list.forEach(g => { m[g] = (m[g] || 0) + 1; }); return m; }
+function hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h; }
+function embed(m) {
+  const v = new Array(8).fill(0);
+  Object.keys(m).forEach(g => { const h = hash(g); v[h % 8] += ((h >>> 3) & 1 ? -1 : 1) * m[g]; });
+  const n = Math.sqrt(v.reduce((a, x) => a + x * x, 0)) || 1;
+  return v.map(x => x / n);
+}
+
+function partialHit(ans, text) {
+  for (let i = 0; i + 8 <= ans.length; i++) if (text.indexOf(ans.slice(i, i + 8)) >= 0) return true;
+  return false;
+}
+
+function run() {
+  const size = +$('#size').value, ov = +$('#ov').value, k = +$('#topk').value;
+  $('#size-v').textContent = size; $('#ov-v').textContent = ov; $('#topk-v').textContent = k;
+  const noRag = $('#norag').checked;
+  const q = $('#q').value.trim();
+  const docs = readDocs();
+  const preset = PRESETS.find(p => p.q === q) || null;
+  $$('#presets button').forEach((b, i) => b.setAttribute('aria-pressed', PRESETS[i] === preset));
+
+  const chunks = [].concat(...docs.map(d => chunkDoc(d, size, ov)));
+  chunks.forEach(c => { c.tok = tokens(c.text); c.tf = tf(grams(c.text)); });
+  const N = chunks.length || 1;
+  const df = {};
+  chunks.forEach(c => Object.keys(c.tf).forEach(g => { df[g] = (df[g] || 0) + 1; }));
+  const idf = g => Math.log(1 + N / (1 + (df[g] || 0)));
+  const wvec = m => { const w = {}; Object.keys(m).forEach(g => { w[g] = m[g] * idf(g); }); return w; };
+  const qtf = tf(grams(q)), qw = wvec(qtf);
+  const norm = w => Math.sqrt(Object.keys(w).reduce((a, g) => a + w[g] * w[g], 0)) || 1;
+  const qn = norm(qw);
+  chunks.forEach(c => {
+    const w = wvec(c.tf);
+    let dot = 0; Object.keys(qw).forEach(g => { if (w[g]) dot += qw[g] * w[g]; });
+    c.score = dot / (qn * norm(w));
+    c.vec = embed(c.tf);
+  });
+  const qvec = embed(qtf);
+  const ranked = chunks.map((c, i) => ({ c, i })).sort((a, b) => b.c.score - a.c.score || a.i - b.i);
+  const picked = ranked.filter(r => r.c.score > 0).slice(0, k).map(r => r.c);
+  const pickedSet = new Set(picked.map(c => c.id));
+
+  // answer analysis (only when the question is one of the presets and the sentence still exists)
+  let full = [], part = [], inKB = false;
+  if (preset) {
+    inKB = docs.some(d => d.text.indexOf(preset.ans) >= 0);
+    chunks.forEach(c => {
+      if (c.text.indexOf(preset.ans) >= 0) full.push(c.id);
+      else if (partialHit(preset.ans, c.text)) part.push(c.id);
+    });
+  }
+  const used = noRag ? null : picked;
+  const gotFull = noRag ? inKB : !!(used && used.some(c => full.indexOf(c.id) >= 0));
+  const gotPart = !noRag && !gotFull && !!(used && used.some(c => part.indexOf(c.id) >= 0));
+  const ctxChunks = noRag ? docs.map(d => ({ id: d.id, text: d.text, tok: tokens(d.text) })) : picked;
+  const ctxTok = ctxChunks.reduce((a, c) => a + c.tok, 0);
+
+  // 1. chunks
+  $('#ck-sub').textContent = '共 ' + chunks.length + ' 段，每段約 ' + fmt(chunks.reduce((a, c) => a + c.tok, 0) / N) + ' tokens；橘底是和前一段重疊的部分';
+  $('#chunks').innerHTML = chunks.map(c => {
+    const cls = full.indexOf(c.id) >= 0 ? 'full' : part.indexOf(c.id) >= 0 ? 'part' : '';
+    const tag = cls === 'full' ? ' <span class="chip ok">含完整答案</span>' : cls === 'part' ? ' <span class="chip warn">只含部分答案</span>' : '';
+    const t = c.ov ? '<span class="ov">' + esc(c.text.slice(0, c.ov)) + '</span>' + esc(c.text.slice(c.ov)) : esc(c.text);
+    return '<div class="ck ' + cls + (!noRag && pickedSet.has(c.id) ? ' used' : '') + '"><b>' + c.id + '</b><span class="tk">' + c.tok + ' tok</span>' + tag + '<br>' + t + '</div>';
+  }).join('');
+
+  // 2. vectors
+  const vrow = (id, v, hl) => '<tr' + (hl ? ' class="pick"' : '') + '><td>' + esc(id) + '</td><td class="vec">[' + v.map(x => (x >= 0 ? '+' : '') + x.toFixed(2)).join(', ') + ']</td></tr>';
+  $('#vecs').innerHTML = '<table><thead><tr><th>對象</th><th>8 維向量（已正規化）</th></tr></thead><tbody>' + vrow('問題', qvec, true) + chunks.map(c => vrow(c.id, c.vec, pickedSet.has(c.id) && !noRag)).join('') + '</tbody></table>';
+
+  // 3. ranking
+  const rows = ranked.slice(0, Math.max(k + 3, 6));
+  $('#rank').innerHTML = '<table><thead><tr><th>名次</th><th>段落</th><th>相似度</th><th>結果</th></tr></thead><tbody>' + rows.map((r, n) => {
+    const hit = pickedSet.has(r.c.id);
+    return '<tr class="' + (hit && !noRag ? 'pick' : '') + '"><td>' + (n + 1) + '</td><td>' + r.c.id + (full.indexOf(r.c.id) >= 0 ? ' <span class="chip ok">答案</span>' : '') + '</td><td><span class="bar" style="width:' + Math.round(r.c.score * 90) + 'px"></span> <span class="num">' + r.c.score.toFixed(2) + '</span></td><td>' + (noRag ? '<span class="chip">未使用</span>' : hit ? '<span class="chip accent">取用</span>' : '<span class="chip">落選</span>') + '</td></tr>';
+  }).join('') + '</tbody></table>' + (noRag ? '<p class="small muted" style="margin:6px 0 0">目前是「不用 RAG」，檢索結果不會被使用。</p>' : '');
+  $('#box-vec').classList.toggle('dim-box', noRag);
+  $('#box-rank').classList.toggle('dim-box', noRag);
+
+  // 4. prompt
+  const content = ctxChunks.map(c => ({ type: 'text', text: '[' + c.id + '] ' + c.text }));
+  content.push({ type: 'text', text: '問題：' + q });
+  const req = { model: 'claude-sonnet-x', max_tokens: 512, system: [{ type: 'text', text: SYSTEM }], messages: [{ role: 'user', content }] };
+  $('#json').innerHTML = jsonHTML(req, { clip: 90 });
+  $('#cache-note').innerHTML = noRag
+    ? '全部 ' + docs.length + ' 份文件都放進 context。文件固定不變時可以搭配 prompt cache 降價，但文件一多就塞不下，雜訊也多，答案也很難指出是哪一段。'
+    : '快取友善的順序：固定的 system 指示放最前面（可被 prompt cache 重用），每題都不同的檢索段落放在後面，問題放最後。';
+
+  // 5. answer + stats
+  let ans, found;
+  if (!preset) {
+    found = '無標準答案';
+    const top = ctxChunks[0];
+    ans = top ? '（示意）依 [' + top.id + ']：' + (top.text.split('。')[0] || top.text) + '。' : '找不到相關段落，我不知道。';
+  } else if (!inKB) {
+    found = '無法判定';
+    ans = '文件中沒有找到相關規定，我不知道。';
+  } else if (gotFull) {
+    found = '找對了';
+    const src = noRag ? preset.doc : used.filter(c => full.indexOf(c.id) >= 0).map(c => c.id).join('、');
+    ans = '根據 [' + src + ']：' + preset.ans + '。';
+  } else if (gotPart) {
+    found = '只找到一半';
+    const src = used.filter(c => part.indexOf(c.id) >= 0).map(c => c.id).join('、');
+    ans = '[' + src + '] 只提到部分內容，資訊不完整，無法確定完整處理方式，建議向管理人員確認。';
+  } else {
+    found = '沒找到';
+    ans = '檢索到的段落沒有相關規定，我不知道。（真實的模型可能會在這裡亂編，所以 system 要要求「找不到就說不知道」。）';
+  }
+  $('#answer').innerHTML = '<span class="chip accent">示意</span> ' + esc(ans);
+  $('#s-found').textContent = found;
+  $('#s-found').style.fontSize = found.length > 4 ? '14px' : '';
+
+  const base = tokens(SYSTEM) + tokens(q) + 30;
+  const tRag = base + ctxTok;
+  const tAll = base + docs.reduce((a, d) => a + tokens(d.text), 0);
+  const outTok = tokens(ans) + 10;
+  $('#s-rag').textContent = fmt(tRag);
+  $('#s-all').textContent = fmt(tAll);
+  $('#s-cost').textContent = usd(cost({ input: tRag, output: outTok }));
+  $('#s-cost2').textContent = usd(cost({ input: tAll, output: outTok }));
+  const avgDoc = docs.reduce((a, d) => a + tokens(d.text), 0) / docs.length;
+  $('#hint').textContent = '真實知識庫若有 2,000 份文件，全塞約 ' + fmt(avgDoc * 2000) + ' tokens';
+
+  // diagnosis
+  const dg = [];
+  if (noRag) dg.push('<div class="note warn">不用 RAG：這次 ' + fmt(tAll) + ' tokens 全部送出，只有 ' + docs.length + ' 份小文件才勉強塞得下；而且回答只能指出整份文件，沒辦法指出是哪一段。</div>');
+  else if (preset && inKB) {
+    const r = ranked.findIndex(x => full.indexOf(x.c.id) >= 0) + 1;
+    if (!full.length) dg.push('<div class="note bad"><b>切段太小：</b>答案句被切成 ' + part.length + ' 段（' + esc(part.join('、')) + '），沒有任何一段裝得下完整答案。加大切段大小或增加重疊。</div>');
+    else if (!gotFull) dg.push('<div class="note bad"><b>top-k 太小：</b>含完整答案的段落排第 ' + r + '，但 top-k 只有 ' + k + '，沒被取用。調大 top-k。</div>');
+    else {
+      dg.push('<div class="note ok"><b>找對了：</b>含完整答案的段落排第 ' + r + '，已被取用。</div>');
+      const ansTok = tokens(preset.ans), share = ansTok / Math.max(ctxTok, 1);
+      if (share < 0.2) dg.push('<div class="note warn"><b>段落太大或 top-k 太多：</b>帶進 ' + fmt(ctxTok) + ' tokens，答案只佔約 ' + Math.round(share * 100) + '%，其餘是雜訊，要多付錢、也可能干擾模型。</div>');
+    }
+  } else if (preset && !inKB) dg.push('<div class="note warn">這個問題的答案句已經不在文件中，所以無法判定是否找對。</div>');
+  else dg.push('<div class="note">自訂問題沒有標準答案，無法自動判定；請看排名和被取用的段落自行判斷。想看「找對了嗎」請點上面的範例問題。</div>');
+  $('#diag').innerHTML = dg.join('');
+}
+
+$('#docs').innerHTML = DOCS0.map((d, i) => '<div class="field"><label for="doc-' + i + '">' + d.id + '　' + esc(d.title) + '</label><textarea id="doc-' + i + '" rows="4"></textarea></div>').join('');
+$('#presets').innerHTML = PRESETS.map((p, i) => '<button type="button" data-i="' + i + '" aria-pressed="false">' + esc(p.q) + '</button>').join('');
+function setDocs() { DOCS0.forEach((d, i) => { $('#doc-' + i).value = d.text; }); }
+setDocs();
+$('#q').value = PRESETS[0].q;
+$$('#presets button').forEach(b => b.addEventListener('click', () => { $('#q').value = PRESETS[+b.dataset.i].q; run(); }));
+$('#reset-docs').addEventListener('click', () => { setDocs(); run(); });
+$$('textarea, input').forEach(el => { el.addEventListener('input', run); el.addEventListener('change', run); });
+run();
+</script>
+</body>
+</html>

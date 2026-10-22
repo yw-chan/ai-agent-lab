@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>名詞小辭典</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+.gl { max-width: 860px; display: grid; gap: 18px; padding-bottom: 48px; }
+.gl-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.gl-bar input { flex: 1 1 240px; }
+.gl-group h2 { font-family: var(--f-display); font-size: 1.2rem; margin: 0 0 8px; color: var(--accent); }
+.gl-list { display: grid; gap: 8px; margin: 0; }
+.term { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; display: grid; grid-template-columns: minmax(0, 13rem) minmax(0, 1fr); gap: 4px 14px; scroll-margin-top: 16px; }
+.term:target { border-color: var(--accent); background: var(--accent-soft); }
+.term dt { font-weight: 700; }
+.term dt small { display: block; font-family: var(--f-mono); font-weight: 500; font-size: 12px; color: var(--muted); }
+.term dd { margin: 0; font-size: 14px; }
+.term dd a { font-size: 13px; }
+@media (max-width: 560px) { .term { grid-template-columns: minmax(0, 1fr); } }
+.empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <h1>名詞小辭典</h1>
+  <p class="lede">實驗頁裡出現的名詞，一句話解釋加一個例子。每個名詞旁邊有對應的實驗頁，可以直接去玩。</p>
+</header>
+
+<main class="wrap gl">
+  <div class="gl-bar">
+    <input type="text" id="q" placeholder="搜尋，例如：快取、tool_use、向量" aria-label="搜尋名詞">
+    <span class="small muted" id="count"></span>
+  </div>
+  <div id="out"></div>
+</main>
+
+<script src="common.js"></script>
+<script>
+const G = [
+  ['模型與 API', [
+    ['Token', 'token', '模型計算長度和費用的單位。英文大約 4 個字元一個 token，中文大約每個字 1 個以上。', 'tokens.html'],
+    ['Request／Response', 'request / response', '送給 API 的內容（system、工具、對話、訊息）和模型回傳的內容（文字、思考、工具呼叫、usage）。', 'tokens.html'],
+    ['無狀態', 'stateless', 'API 不會記得上一輪；每一輪都要把整段對話重送，所以對話越長越貴。', 'tokens.html'],
+    ['System prompt', 'system', '放在最前面的角色設定和規則，例如 CLAUDE.md 的內容。', 'tokens.html'],
+    ['輸入／輸出 token', 'input / output tokens', '送進去的和模型產生的 token 分開計價，輸出通常比較貴。', 'tokens.html'],
+    ['延伸思考', 'extended thinking', '模型先推理再回答；思考內容按輸出 token 計費。', 'effort.html'],
+    ['推理強度', 'effort', '控制模型想多深、做多少。越高越準但越慢越貴。', 'effort.html'],
+    ['Temperature', 'temperature', '控制回答的隨機程度。越低越穩定，越高越多樣。', 'qa.html'],
+    ['結構化輸出', 'structured output', '讓模型照指定的 JSON schema 輸出，程式端再驗證。', 'qa.html']
+  ]],
+  ['快取與上下文', [
+    ['提示詞快取', 'prompt cache', '把每次都一樣的前段內容存起來重用，前綴完全相同才會命中，讀取很便宜。', 'cache.html'],
+    ['快取斷點', 'cache_control', '標記「快取到這裡為止」的位置。', 'cache.html'],
+    ['TTL', 'time to live', '快取的存活時間，過了沒人用就失效，命中會重新計時。', 'cache.html'],
+    ['上下文視窗', 'context window', '模型一次能看到的全部內容的上限，例如 200K 或 1M token（輸入加輸出）。', 'context.html'],
+    ['注意力稀釋', 'lost in the middle', '內容太多、無關內容太多時，模型容易忽略中間的資訊。', 'context.html'],
+    ['壓縮', 'compaction / /compact', '上下文快滿時把舊對話摘要，細節和只在聊天說過的規則可能不見。', 'memory.html'],
+    ['CLAUDE.md', 'CLAUDE.md', 'Claude Code 每次啟動都會載入的規則檔，壓縮後也會重新載入。', 'memory.html'],
+    ['自動記憶', 'auto memory', 'Claude Code 把學到的偏好和專案背景寫成檔案，下次啟動時載入。', 'memory.html']
+  ]],
+  ['工具與 Agent', [
+    ['Agent', 'agent', '會反覆「想 → 呼叫工具 → 看結果」直到完成任務的程式，例如 Claude Code。', 'tools.html'],
+    ['工具', 'tool', '模型可以要求使用的動作，例如讀檔、執行指令。模型只要求，Agent 才是執行的人。', 'tools.html'],
+    ['tool_use／tool_result', 'tool_use / tool_result', '模型回傳的「我要呼叫這個工具」區塊，以及 Agent 把執行結果送回去的區塊。', 'tools.html'],
+    ['MCP', 'Model Context Protocol', '讓外部系統用統一格式提供工具的協定。對模型來說，MCP 工具跟一般工具一樣。', 'tools.html'],
+    ['Skill', 'skill', '按需載入的工作說明書。平常只載入一句描述，任務相符才載入全文。', 'tools.html'],
+    ['子代理', 'subagent', '有自己獨立上下文的另一個 Agent，做完只回傳結論。', 'subagent.html'],
+    ['交辦包', 'brief', '派工作給子代理或 Agent 時寫的說明：目標、限制、相關檔案、輸出格式、完成標準。', 'workitems.html'],
+    ['模型路由', 'model routing', '依每個步驟需要的判斷力選不同等級的模型。', 'routing.html'],
+    ['Hook', 'hook', 'Claude Code 在特定時機自動執行的指令，可以擋下危險操作或自動跑檢查，不靠模型記憶。', 'hooks.html'],
+    ['規劃模式', 'plan mode', '只讀不改，先產出計畫，確認後才動手。', 'habits.html']
+  ]],
+  ['AI 應用', [
+    ['RAG', 'retrieval-augmented generation', '先從知識庫找出相關段落，再交給模型回答，並附上出處。', 'rag.html'],
+    ['切段', 'chunking', '把文件切成一段一段方便檢索。太小會把答案切斷，太大雜訊多又貴。', 'rag.html'],
+    ['向量／Embedding', 'embedding', '把文字轉成一串數字，意思相近的文字向量也相近。', 'rag.html'],
+    ['向量資料庫', 'vector database', '存放向量並快速找出最相近幾筆的資料庫。', 'rag.html'],
+    ['top-k', 'top-k', '檢索時取最相近的前幾段。', 'rag.html'],
+    ['忠實度', 'faithfulness', '回答是否都有資料依據，沒有亂編。', 'eval.html'],
+    ['幻覺', 'hallucination', '模型講出資料裡沒有、或根本錯誤的內容。', 'eval.html'],
+    ['LLM 當評審', 'LLM-as-judge', '用另一個模型依評分標準替回答打分；評審本身也要抽查。', 'eval.html'],
+    ['回歸', 'regression', '新版本整體變好，但原本答對的題目變錯。', 'eval.html'],
+    ['Prompt Injection', 'prompt injection', '外部內容裡藏著「忽略前面的指示」之類的文字，想騙 Agent 做壞事。', 'security.html'],
+    ['最小權限', 'least privilege', '只給 Agent 完成任務需要的工具和權限。', 'security.html']
+  ]],
+  ['測試與審查', [
+    ['覆蓋率', 'coverage', '測試執行到多少程式碼。只代表有執行到，不代表錯了會被抓到。', 'testing.html'],
+    ['變異測試', 'mutation testing', '故意把程式改壞，看測試會不會失敗。.NET 可以用 Stryker.NET。', 'testing.html'],
+    ['Flaky 測試', 'flaky test', '同樣的程式碼，有時過有時不過的測試，常見原因是依賴時間、亂數或外部服務。', 'testing.html'],
+    ['對抗性驗證', 'adversarial verification', '用乾淨的上下文重新檢查每個發現，確認真的會出錯，刪掉誤報。', 'review.html'],
+    ['Conventional Commits', 'conventional commits', 'commit message 格式：類型(範圍): 摘要，例如 fix(庫存): …。', 'habits.html']
+  ]]
+];
+
+const titles = { 'tokens.html': 'Token 組成', 'effort.html': 'Effort', 'cache.html': 'Prompt Cache', 'context.html': 'Context Window', 'tools.html': 'Tool、MCP、Skill', 'memory.html': '長任務記憶', 'subagent.html': 'Subagent', 'routing.html': '模型路由', 'workitems.html': '需求拆解', 'review.html': 'Code Review', 'testing.html': '測試有效性', 'habits.html': '開發習慣', 'rag.html': 'RAG 檢索', 'eval.html': 'LLM 評測', 'hooks.html': 'Hooks', 'security.html': 'Prompt Injection 安全' };
+const slug = s => s.toLowerCase().replace(/[^a-z0-9一-鿿]+/g, '-').replace(/^-|-$/g, '');
+
+function render(q) {
+  q = q.trim().toLowerCase();
+  let total = 0, html = '';
+  for (const [group, items] of G) {
+    const hit = items.filter(([t, en, d]) => !q || (t + ' ' + en + ' ' + d).toLowerCase().includes(q));
+    if (!hit.length) continue;
+    total += hit.length;
+    html += `<section class="gl-group"><h2>${Lab.esc(group)}</h2><dl class="gl-list">${hit.map(([t, en, d, page]) => {
+      // pages that are not in this copy of the site (e.g. the public one) get no link
+      const link = page && titles[page] ? ` <a href="${page}" data-page="${page}">→ ${Lab.esc(titles[page])}</a>` : '';
+      return `<div class="term" id="${slug(en)}"><dt>${Lab.esc(t)}<small>${Lab.esc(en)}</small></dt><dd>${Lab.esc(d)}${link}</dd></div>`;
+    }).join('')}</dl></section>`;
+  }
+  Lab.$('#out').innerHTML = html || '<p class="empty">找不到符合的名詞。</p>';
+  Lab.$('#count').textContent = `${total} 個名詞`;
+}
+
+Lab.$('#q').addEventListener('input', e => render(e.target.value));
+render('');
+if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
+</script>
+</body>
+</html>

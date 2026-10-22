@@ -53,5 +53,13 @@
   const $ = (s, root = document) => root.querySelector(s);
   const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
+  // remember which pages were opened, so the index can show progress
+  try {
+    const page = decodeURIComponent(location.pathname.split('/').pop() || 'index.html');
+    const seen = store.get('visited', {});
+    seen[page] = Date.now();
+    store.set('visited', seen);
+  } catch {}
+
   window.Lab = { tokens, PRICE, cost, fmt, usd, esc, jsonHTML, bar, store, $, $$ };
 })();

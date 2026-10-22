@@ -123,6 +123,8 @@
   </div>
 </section>
 
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">覆蓋率只代表程式有被執行到，不代表改錯時測試會失敗，所以下一步要追求有效性。找無效測試的方法是掃沒有斷言、只斷言不是 null 或用 try/catch 吞掉錯誤的測試，再用變異測試，也就是自動把程式改壞，看測試會不會失敗。脆弱測試則是重複執行、打亂順序，找出時好時壞的，並把時間和外部呼叫改成可注入的假資料。處理完後在 CI 加防線，要求 AI 寫測試時說明每個測試在防哪種錯。</p><ul class="more"><li>被追問時可以補：.NET 可以用 Stryker.NET 做變異測試。</li><li>重構但行為沒變卻壞掉的測試，代表耦合實作細節太深，要改成驗證行為。</li><li>沒價值的測試可以直接刪除，不然只會增加維護成本。</li></ul></div></section>
+
 <nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="review.html"><span>← 上一題</span><b>Code Review Skill</b></a><a class="pg next" href="habits.html"><span>下一題 →</span><b>開發習慣</b></a></nav>
 
 <script src="common.js"></script>

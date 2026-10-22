@@ -152,6 +152,8 @@
   </div>
 </section>
 
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">Context window 是模型一次能看到的全部內容，1M 是指輸入加輸出合計約一百萬 token 的上限。它只是容量，不代表放滿還一樣準，也不代表便宜。放太多會變貴、變慢，中段的資訊也容易被忽略。接近上限時還會被自動壓縮，細節可能被摘掉。所以我只讀相關的檔案，大量讀取交給子代理，換任務就清空。</p><ul class="more"><li>被追問時可以補：工具輸出先過濾，例如只取錯誤行或限制筆數，不要整份灌進來。</li><li>舊的程式碼或已推翻的決定留在上下文裡，模型可能照舊的做。</li><li>重要規則寫進檔案，壓縮後也會重新載入。</li></ul></div></section>
+
 <nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="cache.html"><span>← 上一題</span><b>Prompt Cache</b></a><a class="pg next" href="tools.html"><span>下一題 →</span><b>Tool、MCP、Skill</b></a></nav>
 
 <script src="common.js"></script>

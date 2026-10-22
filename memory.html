@@ -125,6 +125,8 @@
   </div>
 </section>
 
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">Claude Code 本身不會記得上一個 session，記憶靠每次啟動自動載入的檔案。像 CLAUDE.md 放使用者或專案的規範，.claude/rules 可以依路徑套用，另外還有 Claude 自己寫的自動記憶。忘記的主因是對話被自動壓縮，只在聊天裡說過的限制很容易被摘掉。所以我會把規則寫進檔案，寫得具體，再用 hooks、測試或 CI 來強制，不靠模型記憶。</p><ul class="more"><li>被追問時可以補：任務切小，做完就開新 session，計畫和進度寫成檔案再讀回來。</li><li>子代理不會繼承規則，交辦時要把相關限制寫進去。</li><li>手動壓縮時可以指定要保留的限制，完成前用乾淨的上下文對照規範驗收。</li></ul></div></section>
+
 <nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="tools.html"><span>← 上一題</span><b>Tool、MCP、Skill</b></a><a class="pg next" href="subagent.html"><span>下一題 →</span><b>Subagent</b></a></nav>
 
 <script src="common.js"></script>

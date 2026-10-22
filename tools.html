@@ -168,6 +168,8 @@
   </div>
 </section>
 
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">模型本身只會輸出一段要求呼叫工具的結構化文字，真正執行的是本機的 Agent 程式。Agent 把工具清單放進請求，模型依說明文字決定要用哪個，Agent 執行後再把結果送回去，一直循環到完成。MCP 是讓外部系統用統一格式提供工具的協定，Skill 則是需要時才載入的工作說明書。簡單說，Tool 是動作，MCP 是接外部系統的標準，Skill 是流程知識。</p><ul class="more"><li>被追問時可以補：工具選得準不準，很大程度看 description 寫得好不好。</li><li>MCP 工具對模型來說和內建工具一樣，但每個定義都佔 token，連太多 server 反而容易選錯。</li><li>Skill 平常只放名稱和一句描述，任務相符時才載入全文。在 Claude Code 可以用 /mcp 看連線，用 /context 看各部分佔多少 token。</li></ul></div></section>
+
 <nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="context.html"><span>← 上一題</span><b>Context Window</b></a><a class="pg next" href="memory.html"><span>下一題 →</span><b>長任務記憶</b></a></nav>
 
 <script src="common.js"></script>

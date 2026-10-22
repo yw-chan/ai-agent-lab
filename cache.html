@@ -170,6 +170,8 @@
   </div>
 </section>
 
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">Prompt cache 是把每次都一樣的前段內容算好存起來，下次前綴完全相同就直接重用。讀取的價格大約是一般輸入的十分之一，所以重複用越多次越划算。它是從頭開始比對，比到第一個不同的地方就停，後面就算一樣也用不到。所以我會把穩定的內容放前面，變動的放後面。system prompt 裡也不放時間戳記這類每次都會變的東西。</p><ul class="more"><li>被追問時可以補：順序是 tools、system、messages，前面任何一層改了，後面的快取全部失效。</li><li>快取有存活時間，預設約 5 分鐘，每次命中會重新計時。</li><li>寫入快取比一般輸入貴一點，另外前綴太短也不會被快取。數字會隨模型調整，細節以官方文件為準。</li></ul></div></section>
+
 <nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="effort.html"><span>← 上一題</span><b>Reasoning Effort</b></a><a class="pg next" href="context.html"><span>下一題 →</span><b>Context Window</b></a></nav>
 
 <script src="common.js"></script>

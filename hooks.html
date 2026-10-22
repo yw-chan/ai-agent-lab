@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Hooks 實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .hk-list { display: grid; gap: 6px; }
+  .hk-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+  .hk-item .t { min-width: 0; display: grid; gap: 2px; }
+  .hk-item .t > span { overflow-wrap: anywhere; }
+  .add-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .acts { display: grid; gap: 4px; }
+  .acts .check code { white-space: normal; }
+  .lg { border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); min-width: 0; }
+  .lg-h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; }
+  .lg-h .idx { font-family: var(--f-mono); font-size: 12px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--code-bg); color: var(--muted); flex: none; }
+  .lg-h b { font-size: 13.5px; min-width: 0; overflow-wrap: anywhere; flex: 1 1 160px; }
+  .lg-b { padding: 0 10px 10px 40px; display: grid; gap: 6px; min-width: 0; }
+  .run { border-left: 3px solid var(--line); padding-left: 8px; display: grid; gap: 4px; min-width: 0; font-size: 13px; }
+  .run.block { border-color: var(--bad); }
+  .run.fix, .run.log { border-color: var(--accent); }
+  .run.late { border-color: var(--warn); }
+  .run details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+  .run .code { margin-top: 4px; max-height: 260px; }
+  .cmp td, .cmp th { font-size: 13px; }
+  .cmp { min-width: 520px; }
+  .jsonbox { display: grid; gap: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 6</span><span>面試 7</span><span>延伸 Hooks</span></div>
+  <h1>Hooks 實驗</h1>
+  <p class="lede">Hook 是 Claude Code 在特定時機「自動執行的 shell 指令」。規則寫成 hook，每次都會跑，不必靠模型記得。左邊組出 hook 設定、選要重播的動作；右邊看產生的 settings JSON，以及每個動作碰到哪些 hook、結果如何。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>Hook 設定</h2><span class="hint">改動即時重播</span></header>
+    <div class="body">
+      <div class="field">
+        <span class="label">目前的 hooks</span>
+        <div id="hk-list" class="hk-list"></div>
+      </div>
+
+      <form id="add-form" class="field" aria-label="新增 hook">
+        <span class="label">新增一個 hook</span>
+        <div class="add-grid">
+          <div class="field"><label for="f-preset">預設指令</label>
+            <select id="f-preset"></select></div>
+          <div class="field"><label for="f-event">事件（何時跑）</label>
+            <select id="f-event"></select></div>
+          <div class="field"><label for="f-matcher">matcher（套用哪些工具）</label>
+            <input type="text" id="f-matcher" list="matchers" autocomplete="off" spellcheck="false">
+            <datalist id="matchers"><option value="Bash"><option value="Edit|Write"><option value="mcp__.*"><option value="Read"><option value="*"></datalist></div>
+        </div>
+        <p class="sub" id="f-hint" style="margin:0"></p>
+        <div class="row"><button class="btn primary" type="submit">加入這個 hook</button></div>
+      </form>
+
+      <fieldset class="field" style="border:0;padding:0;margin:0">
+        <legend class="label" style="padding:0;font-size:13px;font-weight:500">要重播的 agent 動作</legend>
+        <div id="acts" class="acts"></div>
+      </fieldset>
+
+      <div class="field">
+        <span class="label">對照情境</span>
+        <label class="check"><input type="checkbox" id="long"> <span>對話很長、剛壓縮過（規則可能被摘要掉）</span></label>
+      </div>
+
+      <p class="disclaimer">這是教學用模擬：JSON 欄位、exit code 的語意是常見做法的示意，實際設定欄位與行為請以 Claude Code 官方文件為準。Hook 本身會在你的電腦上執行，只放你看得懂、信得過的指令。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>實際發生的事</h2><span class="hint" id="progress"></span></header>
+    <div class="body">
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-block">0</div><div class="l">擋下幾次</div></div>
+        <div class="stat"><div class="v" id="s-runs">0</div><div class="l">hook 自動跑幾次</div></div>
+        <div class="stat"><div class="v" id="s-fix">0</div><div class="l">自動修正／已記錄</div></div>
+        <div class="stat"><div class="v" id="s-late">0</div><div class="l">事後才發現（擋不住）</div></div>
+      </div>
+
+      <div class="jsonbox">
+        <div class="small muted">示意：由左邊設定產生的 <code>.claude/settings.json</code></div>
+        <pre class="code" id="settings" tabindex="0" aria-label="settings.json 內容，可捲動"></pre>
+      </div>
+
+      <div>
+        <div class="row" style="justify-content:space-between;margin-bottom:6px">
+          <span class="small muted">逐步重播：每個動作碰到哪些 hook</span>
+          <button class="btn" type="button" id="only-block" aria-pressed="false">只看被擋下的</button>
+        </div>
+        <div id="log" style="display:grid;gap:8px"></div>
+        <p class="small muted" style="margin:8px 0 0">exit 0 通常代表允許；PreToolUse 的 exit 2 通常代表擋下，並把 stderr 的文字回給模型（常見做法，以官方文件為準）。</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap" style="padding-bottom:20px">
+  <div class="pane">
+    <header><h2>對照：只寫在 CLAUDE.md vs 用 hook</h2><span class="hint">同一批動作</span></header>
+    <div class="body">
+      <div class="tbl" tabindex="0" aria-label="對照表，可左右捲動"><table class="cmp">
+        <thead><tr><th>動作與規則</th><th>只寫在 CLAUDE.md</th><th>用 hook（依左邊設定）</th></tr></thead>
+        <tbody id="cmp"></tbody>
+      </table></div>
+      <div class="note">CLAUDE.md 是「請模型記得」，屬於機率；hook 是「系統一定執行」，屬於確定性。需要百分之百的規則（安全、禁區、必跑檢查）放 hook，風格偏好留在 CLAUDE.md。</div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li><strong>Hook 是確定性的，不靠記憶</strong>：事件發生就執行，模型有沒有記得規則都不影響。</li>
+      <li><strong>PreToolUse 可以擋，PostToolUse 適合自動檢查</strong>：工具跑完才擋已經來不及，只能回報或修正。</li>
+      <li><strong>matcher 決定套用範圍</strong>：<code>Bash</code>、<code>Edit|Write</code>、<code>mcp__.*</code> 是用工具名稱比對的正規表示式；範圍太寬會拖慢每個動作。</li>
+      <li><strong>Hook 本身是會執行的指令</strong>：它有你的權限，來路不明的 hook 設定和來路不明的腳本一樣危險，要審過再放進 repo。</li>
+    </ul>
+  </div>
+</section>
+
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">Hook 就是 Claude Code 在生命週期事件點自動執行的 shell 指令，用來把規則變成確定性的強制，而不是靠模型記得。例如我會在 PreToolUse 掛一個 hook，偵測到 rm -rf 或 git push --force 就 exit 2 擋下，並把原因回給模型；在 PostToolUse 對改過的 .cs 檔自動跑 dotnet format。CLAUDE.md 只是提示，長對話壓縮後可能被忘掉，hook 每次都會跑。</p><ul class="more"><li>被追問時可以補：matcher 是比對工具名稱的正規表示式，像 Edit|Write 或 mcp__.*，決定 hook 套用到哪些工具。</li><li>被追問時可以補：hook 透過 stdin 收到 JSON（tool_name、tool_input 等），用 exit code 表達決定；細節要以官方文件為準。</li><li>被追問時可以補：Hook 是會在本機執行的指令，要像程式碼一樣審查，不要直接信任別人給的設定。</li></ul></div></section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="eval.html"><span>← 上一題</span><b>LLM 評測</b></a><a class="pg next" href="security.html"><span>下一題 →</span><b>Prompt Injection 安全</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { esc, jsonHTML, $, $$ } = Lab;
+
+const EVENTS = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart'];
+const TOOL_EVENTS = ['PreToolUse', 'PostToolUse'];
+
+const PRESETS = {
+  danger: { label: '擋下危險指令（rm -rf、git push --force）', event: 'PreToolUse', matcher: 'Bash', cmd: 'bash .claude/hooks/block-danger.sh', hint: '通常掛在 PreToolUse + Bash：指令還沒跑就能擋。' },
+  format: { label: '寫檔後自動跑 dotnet format／lint', event: 'PostToolUse', matcher: 'Edit|Write', cmd: 'bash .claude/hooks/format-cs.sh', hint: '通常掛在 PostToolUse + Edit|Write：檔案寫完再整理。' },
+  migrations: { label: '禁止修改 Migrations 資料夾', event: 'PreToolUse', matcher: 'Edit|Write', cmd: 'bash .claude/hooks/protect-migrations.sh', hint: '通常掛在 PreToolUse + Edit|Write：寫入前檢查路徑。' },
+  mcplog: { label: '記錄所有 MCP 呼叫到 log', event: 'PreToolUse', matcher: 'mcp__.*', cmd: 'bash .claude/hooks/log-mcp.sh', hint: 'matcher 用 mcp__.* 比對所有 MCP 工具。' },
+  stoptest: { label: 'Stop 時提醒跑測試', event: 'Stop', matcher: '', cmd: 'bash .claude/hooks/require-tests.sh', hint: 'Stop 事件沒有工具名稱，不需要 matcher。' }
+};
+
+const ACTIONS = [
+  { id: 'a0', type: 'start', label: '工作階段開始', short: 'SessionStart' },
+  { id: 'a1', type: 'prompt', label: '使用者送出：「清理 build 輸出，並修正訂單 Controller」', short: 'UserPromptSubmit', prompt: '清理 build 輸出，並修正訂單 Controller' },
+  { id: 'a2', type: 'tool', tool: 'Bash', label: 'Bash  git status', input: { command: 'git status' } },
+  { id: 'a3', type: 'tool', tool: 'Bash', label: 'Bash  rm -rf bin obj src', input: { command: 'rm -rf bin obj src' }, rule: '規則：不要執行 rm -rf' },
+  { id: 'a4', type: 'tool', tool: 'Edit', label: 'Edit  Controllers/OrderController.cs', input: { file_path: 'Controllers/OrderController.cs', old_string: 'var list = _db.Orders.ToList();', new_string: 'var list = await _db.Orders.AsNoTracking().ToListAsync();' }, rule: '規則：改完 .cs 要跑 dotnet format' },
+  { id: 'a5', type: 'tool', tool: 'Edit', label: 'Edit  Migrations/2026_xxx.cs', input: { file_path: 'Migrations/2026_xxx.cs', old_string: 'DropColumn', new_string: 'AddColumn' }, rule: '規則：不要改 Migrations 資料夾' },
+  { id: 'a6', type: 'tool', tool: 'mcp__tfs__wi_list', label: 'mcp__tfs__wi_list', input: { assigned_to: '@me', state: 'Active' } },
+  { id: 'a7', type: 'stop', label: '工作階段結束（Stop）', short: 'Stop', rule: '規則：結束前要跑 dotnet test' }
+];
+
+let nextId = 4;
+let hooks = [
+  { id: 1, event: 'PreToolUse', matcher: 'Bash', preset: 'danger' },
+  { id: 2, event: 'PostToolUse', matcher: 'Edit|Write', preset: 'format' },
+  { id: 3, event: 'Stop', matcher: '', preset: 'stoptest' }
+];
+const enabled = new Set(ACTIONS.map(a => a.id));
+const openSet = new Set(['a3-0']);
+let onlyBlock = false;
+
+function matches(h, a) {
+  if (!TOOL_EVENTS.includes(h.event)) return true;
+  const m = h.matcher.trim();
+  if (!m || m === '*') return true;
+  try { return new RegExp('^(?:' + m + ')$').test(a.tool); } catch { return false; }
+}
+
+// What each preset script "decides" for an action (illustrative).
+function decide(key, a) {
+  const cmd = a.input && a.input.command ? a.input.command : '';
+  const path = a.input && a.input.file_path ? a.input.file_path : '';
+  const isWrite = a.tool === 'Edit' || a.tool === 'Write';
+  if (key === 'danger' && a.tool === 'Bash' && /rm\s+-rf|git\s+push\s+.*(--force|\s-f\b)/.test(cmd))
+    return { code: 2, kind: 'block', text: 'stderr：已阻擋危險指令（rm -rf／git push --force）。請改用只刪 bin 與 obj 的指令。' };
+  if (key === 'migrations' && isWrite && /(^|\/)Migrations\//.test(path))
+    return { code: 2, kind: 'block', text: 'stderr：Migrations 資料夾禁止直接修改，請用 dotnet ef migrations add。' };
+  if (key === 'format' && isWrite && /\.cs$/.test(path))
+    return { code: 0, kind: 'fix', text: 'stdout：已對 ' + path + ' 執行 dotnet format，排版已自動修正。' };
+  if (key === 'mcplog' && a.tool.indexOf('mcp__') === 0)
+    return { code: 0, kind: 'log', text: 'stdout：已追加一行到 .claude/mcp-calls.log（' + a.tool + '）。' };
+  if (key === 'stoptest' && a.type === 'stop')
+    return { code: 2, kind: 'block', text: 'stderr：這次工作階段還沒跑 dotnet test，請先跑測試再結束。（實務上要檢查 stop_hook_active，避免無限循環）' };
+  return { code: 0, kind: 'pass', text: '腳本檢查後沒有要處理的事，exit 0。' };
+}
+
+function stdinFor(ev, a, extra) {
+  const o = { session_id: 'sess_demo01', cwd: 'D:/code/Shop', hook_event_name: ev };
+  if (a.type === 'tool') { o.tool_name = a.tool; o.tool_input = a.input; if (ev === 'PostToolUse') o.tool_response = { success: true }; }
+  if (a.type === 'prompt') o.prompt = a.prompt;
+  if (a.type === 'start') o.source = 'startup';
+  if (a.type === 'stop') o.stop_hook_active = false;
+  return o;
+}
+
+function simulate() {
+  const out = [];
+  ACTIONS.filter(a => enabled.has(a.id)).forEach(a => {
+    const runs = [];
+    const phase = ev => {
+      let any2 = false;
+      hooks.filter(h => h.event === ev && matches(h, a)).forEach(h => {
+        const r = decide(h.preset, a);
+        let kind = r.kind;
+        if (r.code === 2 && ev === 'PostToolUse') kind = 'late';
+        if (r.code === 2 && ev === 'SessionStart') kind = 'pass';
+        runs.push({ h, ev, r, kind, stdin: stdinFor(ev, a) });
+        if (r.code === 2 && ev !== 'PostToolUse' && ev !== 'SessionStart') any2 = true;
+      });
+      return any2;
+    };
+    let blocked = false, skippedPost = false;
+    if (a.type === 'tool') {
+      blocked = phase('PreToolUse');
+      if (blocked) skippedPost = true; else phase('PostToolUse');
+    } else if (a.type === 'prompt') blocked = phase('UserPromptSubmit');
+    else if (a.type === 'start') phase('SessionStart');
+    else blocked = phase('Stop');
+    const kinds = runs.map(r => r.kind);
+    let outcome = '允許', cls = 'ok';
+    if (blocked) { outcome = '擋下'; cls = 'bad'; }
+    else if (kinds.includes('late')) { outcome = '事後才發現'; cls = 'warn'; }
+    else if (kinds.includes('fix')) { outcome = '自動修正'; cls = 'accent'; }
+    else if (kinds.includes('log')) { outcome = '已記錄'; cls = 'accent'; }
+    out.push({ a, runs, blocked, skippedPost, outcome, cls });
+  });
+  return out;
+}
+
+function settingsObj() {
+  const res = {};
+  EVENTS.forEach(ev => {
+    const hs = hooks.filter(h => h.event === ev);
+    if (!hs.length) return;
+    const groups = [];
+    hs.forEach(h => {
+      const m = TOOL_EVENTS.includes(ev) ? h.matcher.trim() : '';
+      let g = groups.find(x => x.m === m);
+      if (!g) { g = { m, hooks: [] }; groups.push(g); }
+      g.hooks.push({ type: 'command', command: PRESETS[h.preset].cmd });
+    });
+    res[ev] = groups.map(g => (g.m ? { matcher: g.m, hooks: g.hooks } : { hooks: g.hooks }));
+  });
+  return { hooks: res };
+}
+
+function chipFor(r) {
+  return r.code === 2 ? '<span class="chip bad">exit 2</span>' : '<span class="chip ok">exit 0</span>';
+}
+
+function render() {
+  // hook list
+  $('#hk-list').innerHTML = hooks.length ? hooks.map(h => {
+    const p = PRESETS[h.preset];
+    const m = TOOL_EVENTS.includes(h.event) ? `matcher <code>${esc(h.matcher || '*')}</code>` : '不需要 matcher';
+    return `<div class="hk-item"><div class="t"><b><code>${esc(h.event)}</code> ${m}</b><span class="muted">${esc(p.label)}</span></div><button type="button" class="btn" data-rm="${h.id}" aria-label="移除 hook：${esc(p.label)}">移除</button></div>`;
+  }).join('') : '<div class="note warn">目前沒有任何 hook，所有動作都不受 hook 管。</div>';
+
+  // settings
+  $('#settings').innerHTML = jsonHTML(settingsObj(), { clip: 200 });
+
+  // simulation
+  const sim = simulate();
+  const total = sim.reduce((n, s) => n + s.runs.length, 0);
+  $('#progress').textContent = `${sim.length} 個動作，${total} 次 hook`;
+  $('#s-block').textContent = sim.filter(s => s.blocked).length;
+  $('#s-runs').textContent = total;
+  $('#s-fix').textContent = sim.reduce((n, s) => n + s.runs.filter(r => r.kind === 'fix' || r.kind === 'log').length, 0);
+  $('#s-late').textContent = sim.reduce((n, s) => n + s.runs.filter(r => r.kind === 'late').length, 0);
+
+  const shown = onlyBlock ? sim.filter(s => s.blocked) : sim;
+  $('#log').innerHTML = shown.length ? shown.map(s => {
+    const idx = ACTIONS.findIndex(x => x.id === s.a.id) + 1;
+    let body = '';
+    if (!s.runs.length) body += '<div class="small muted">沒有符合的 hook，動作直接進行。</div>';
+    s.runs.forEach((r, j) => {
+      const key = s.a.id + '-' + j;
+      const mt = TOOL_EVENTS.includes(r.ev) ? ` matcher <code>${esc(r.h.matcher || '*')}</code>` : '';
+      let extra = '';
+      if (r.kind === 'late') extra = '<div class="small" style="color:var(--warn)">PostToolUse 是工具跑完才執行，exit 2 只能把訊息回給模型，動作已經發生了。要擋請改掛 PreToolUse。</div>';
+      body += `<div class="run ${r.kind === 'pass' ? '' : r.kind}"><div><code>${esc(r.ev)}</code>${mt} → <code>${esc(PRESETS[r.h.preset].cmd.replace('bash ', ''))}</code> ${chipFor(r.r)}</div><div class="small">${esc(r.r.text)}</div>${extra}<details data-k="${key}"${openSet.has(key) ? ' open' : ''}><summary>hook 從 stdin 收到的 JSON（示意）</summary><pre class="code" tabindex="0">${jsonHTML(r.stdin, { clip: 120 })}</pre></details></div>`;
+    });
+    if (s.skippedPost) body += '<div class="small muted">被 PreToolUse 擋下，工具沒有執行，PostToolUse 也不會跑。</div>';
+    return `<div class="lg"><div class="lg-h"><span class="idx">${idx}</span><b>${esc(s.a.label)}</b><span class="chip ${s.cls}">${s.outcome}</span></div><div class="lg-b">${body}</div></div>`;
+  }).join('') : '<div class="note">這組設定沒有擋下任何動作。</div>';
+
+  // contrast
+  const long = $('#long').checked;
+  const rows = sim.filter(s => s.a.rule);
+  $('#cmp').innerHTML = rows.length ? rows.map(s => {
+    const md = long
+      ? '<span class="chip bad">可能忘記</span> 規則在壓縮時可能被摘要掉，模型照樣執行'
+      : '<span class="chip warn">多半遵守</span> 靠模型記得，沒有保證';
+    const hk = s.runs.length
+      ? `<span class="chip ${s.cls}">${s.outcome}</span> ${s.blocked ? '每次都擋，與對話長短無關' : '每次都執行，與對話長短無關'}`
+      : '<span class="chip warn">沒有對應 hook</span> 退回靠模型記憶';
+    return `<tr><td>${esc(s.a.label)}<br><span class="muted small">${esc(s.a.rule)}</span></td><td>${md}</td><td>${hk}</td></tr>`;
+  }).join('') : '<tr><td colspan="3" class="muted">請在左邊勾選含有規則的動作（rm -rf、Edit .cs、Migrations、Stop）。</td></tr>';
+}
+
+function fillFormFromPreset() {
+  const p = PRESETS[$('#f-preset').value];
+  $('#f-event').value = p.event;
+  $('#f-matcher').value = p.matcher;
+  syncMatcher();
+  $('#f-hint').textContent = p.hint;
+}
+function syncMatcher() {
+  const t = TOOL_EVENTS.includes($('#f-event').value);
+  $('#f-matcher').disabled = !t;
+  if (!t) $('#f-matcher').value = '';
+}
+
+// init form
+$('#f-preset').innerHTML = Object.keys(PRESETS).map(k => `<option value="${k}">${esc(PRESETS[k].label)}</option>`).join('');
+$('#f-event').innerHTML = EVENTS.map(e => `<option value="${e}">${e}</option>`).join('');
+$('#acts').innerHTML = ACTIONS.map(a => `<label class="check"><input type="checkbox" data-act="${a.id}" checked> <span><code>${esc(a.label)}</code></span></label>`).join('');
+$('#f-preset').value = 'migrations';
+fillFormFromPreset();
+
+$('#f-preset').addEventListener('change', fillFormFromPreset);
+$('#f-event').addEventListener('change', () => { syncMatcher(); if (TOOL_EVENTS.includes($('#f-event').value) && !$('#f-matcher').value) $('#f-matcher').value = PRESETS[$('#f-preset').value].matcher || '*'; });
+$('#add-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const ev = $('#f-event').value;
+  hooks.push({ id: nextId++, event: ev, matcher: TOOL_EVENTS.includes(ev) ? ($('#f-matcher').value.trim() || '*') : '', preset: $('#f-preset').value });
+  render();
+});
+$('#hk-list').addEventListener('click', e => {
+  const b = e.target.closest('[data-rm]');
+  if (b) { hooks = hooks.filter(h => h.id !== +b.dataset.rm); render(); }
+});
+$('#acts').addEventListener('change', e => {
+  const id = e.target.dataset.act;
+  if (!id) return;
+  if (e.target.checked) enabled.add(id); else enabled.delete(id);
+  render();
+});
+$('#long').addEventListener('change', render);
+$('#only-block').addEventListener('click', e => {
+  onlyBlock = !onlyBlock;
+  e.currentTarget.setAttribute('aria-pressed', String(onlyBlock));
+  render();
+});
+$('#log').addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.dataset && d.dataset.k) { if (d.open) openSet.add(d.dataset.k); else openSet.delete(d.dataset.k); }
+}, true);
+render();
+</script>
+</body>
+</html>

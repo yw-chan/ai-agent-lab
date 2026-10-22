@@ -179,4 +179,12 @@ code { font-family: var(--f-mono); font-size: .88em; background: var(--code-bg);
 .pager .next { text-align: right; grid-column: 2; }
 .takeaways:has(+ .pager) { padding-bottom: 16px; }
 
+/* "口試怎麼答": a ready-to-say 30-second answer at the bottom of each lab page */
+.oral { padding-block: 0 20px; }
+.oral .box { background: var(--accent-soft); border-radius: 12px; padding: 14px 18px; display: grid; gap: 8px; }
+.oral h2 { font-family: var(--f-display); font-size: 1.2rem; margin: 0; }
+.oral .say { margin: 0; font-size: 15px; line-height: 1.8; }
+.oral .more { margin: 0; padding-left: 1.2em; font-size: 14px; color: var(--muted); }
+.oral .more li { margin: 2px 0; }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

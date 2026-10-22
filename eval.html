@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>LLM 評測實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .tool-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .case { border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); min-width: 0; }
+  .case > summary { cursor: pointer; padding: 8px 10px; font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere; }
+  .case .in { padding: 4px 10px 10px; display: grid; gap: 8px; min-width: 0; }
+  .case textarea { min-height: 56px; font-size: 13px; }
+  .prompt-box { font-size: 12.5px; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); overflow-wrap: anywhere; }
+  .st { display: grid; gap: 6px; min-width: 0; }
+  .st h3 { margin: 0; font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .st h3 .sub { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .scroll { max-height: 440px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 10px; align-content: start; }
+  .cs { display: grid; gap: 4px; min-width: 0; }
+  .cs > .hd { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+  .rn { border-left: 3px solid var(--line); padding: 4px 8px; font-size: 12.5px; background: var(--surface-2); border-radius: 0 6px 6px 0; overflow-wrap: anywhere; display: grid; gap: 3px; }
+  .rn.bad { border-left-color: var(--bad); }
+  .rn.good { border-left-color: var(--ok); }
+  .rn .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .verdict { padding: 10px 12px; border-radius: 8px; display: grid; gap: 6px; font-size: 13.5px; }
+  .verdict ul { margin: 0; padding-left: 1.2em; }
+  .verdict .big { font-family: var(--f-display); font-size: 1.15rem; font-weight: 700; }
+  .verdict.ok { background: var(--ok-soft); }
+  .verdict.bad { background: var(--bad-soft); }
+  .tbl td.q { min-width: 150px; overflow-wrap: anywhere; }
+  tr.reg td { background: var(--bad-soft); }
+  tr.imp td { background: var(--ok-soft); }
+  .off { opacity: .45; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>延伸 評測</span></div>
+  <h1>LLM 評測實驗</h1>
+  <p class="lede">情境：你改了客服知識庫 agent 的 prompt，想知道新版能不能上線。左邊決定測試集、每題跑幾次和要看哪些指標，右邊比較舊版 A 與新版 B：每次的回答、命中的事實、亂編的句子、工具呼叫，以及能不能上線的判斷。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>測試集與評測設定</h2><span class="hint">修改後右邊即時更新</span></header>
+    <div class="body">
+      <div class="field">
+        <span class="label" id="ver-label">檢視哪個版本的逐次結果</span>
+        <div class="seg-ctl" id="ver" role="group" aria-labelledby="ver-label">
+          <button type="button" data-v="A" aria-pressed="false">版本 A（舊 prompt）</button>
+          <button type="button" data-v="B" aria-pressed="true">版本 B（新 prompt）</button>
+        </div>
+        <div class="prompt-box"><b>A：</b>你是客服助理，請親切、完整地回答，開頭先問候。<br><b>B：</b>你是客服助理，回答簡短直接；需要查資料或操作時先呼叫工具，不要憑空回答。</div>
+        <span class="sub">不論檢視哪一版，右邊的 A / B 比較永遠兩版一起算。</span>
+      </div>
+
+      <div class="field">
+        <label for="runs">每題跑幾次：<b id="runs-v"></b></label>
+        <input type="range" id="runs" min="1" max="5" step="1" value="3">
+        <span class="sub">LLM 的輸出每次不一定相同；只跑 1 次，運氣好壞就會被當成實力。</span>
+      </div>
+
+      <div class="field">
+        <span class="label" id="met-label">要看的指標（點選開關）</span>
+        <div class="tool-row" id="metrics" role="group" aria-labelledby="met-label"></div>
+      </div>
+
+      <div class="row"><button type="button" class="btn primary" id="go">執行評測</button><span class="small muted" id="log" role="status"></span></div>
+
+      <div class="field">
+        <span class="label">測試集（可改題目、關鍵事實、預期工具）</span>
+        <div id="cases" style="display:grid;gap:8px"></div>
+        <span class="sub">示意：回答是預先寫好的樣本。改關鍵事實的文字只影響顯示；真實評測要重新呼叫 agent 並重新判分。事實依「第幾行」對應，多出來的行視為沒答到。</span>
+      </div>
+
+      <p class="disclaimer">所有數字都是示意估算：回答與評分是預先寫好的教學樣本，token 依字數粗估，費用用示意單價（輸入 $3、輸出 $15，每百萬 token），真實專案的分數與成本會不同。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>評測結果</h2><span class="hint" id="hint"></span></header>
+    <div class="body">
+      <div class="stats" id="stats"></div>
+
+      <div class="st">
+        <h3>上線判準<span class="sub">先講好標準，再看數字</span></h3>
+        <div id="verdict"></div>
+      </div>
+
+      <div class="st">
+        <h3>A / B 逐題比較<span class="sub">綜合分 ＝ 已開啟指標的平均；一致性 ＝ 同一題的多次結果有多相同</span></h3>
+        <div class="tbl" id="cmp"></div>
+      </div>
+
+      <div class="st">
+        <h3>各指標分數</h3>
+        <div class="tbl" id="mtbl"></div>
+      </div>
+
+      <div class="st">
+        <h3>逐次結果<span class="sub" id="det-sub"></span></h3>
+        <div class="scroll" id="detail" tabindex="0" aria-label="逐次結果清單"></div>
+      </div>
+
+      <div class="st">
+        <h3>單筆評測紀錄</h3>
+        <div class="field">
+          <label class="sub" for="rec">選一筆（目前檢視的版本）</label>
+          <select id="rec"></select>
+        </div>
+        <pre class="code" id="json" tabindex="0"></pre>
+      </div>
+
+      <div class="note">
+        <b>規則檢查 vs LLM 當裁判（LLM-as-judge）：</b>工具名稱對不對、格式、長度可以用程式直接判，快、便宜、結果固定。「有沒有亂編」「事實有沒有答到」要看語意，才交給另一個模型當裁判，它能處理換句話說，但會有偏差、結果也不一定穩定。所以裁判本身也要驗：拿一批人工標註過的答案給它評，一致率夠高才能信。
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li><strong>固定測試集。</strong>每次改 prompt 或換模型，都用同一批題目跑，分數才能前後比較。</li>
+      <li><strong>多跑幾次看穩定度。</strong>同一題跑 1 次可能剛好答對；跑多次才看得出會不會偶爾失手，一致性低本身就是問題。</li>
+      <li><strong>指標要能量化。</strong>把「好不好」拆成可以算分的項目：有沒有亂編、事實涵蓋率、工具有沒有呼叫對、格式、長度。</li>
+      <li><strong>版本比較抓回歸。</strong>新版平均分數更高，不代表每一題都更好；重要題目一旦退步，就算整體進步也不能直接上線。</li>
+      <li><strong>真實失敗案例回填成測試。</strong>線上出現的錯誤，修好之後補進測試集，避免同樣的錯誤再次發生。</li>
+    </ul>
+  </div>
+</section>
+
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">評測就是用一組固定的測試題，每次改 prompt 或換模型都重跑，用量化指標判斷有沒有變好。我會把指標拆成有沒有亂編、關鍵事實涵蓋率、工具呼叫是否正確、格式和長度，每題跑多次看穩定度，再拿新舊版本逐題比較。重點是看回歸：新版平均分數高，但如果某個重要題目退步，就不能上線。上線前先定好門檻，例如不亂編率要到 95% 以上，而且關鍵題目不能退步。</p><ul class="more"><li>被追問時可以補：能用程式判斷的就用規則檢查，例如工具名稱、JSON 格式、長度；需要語意判斷的才用 LLM 當裁判。</li><li>被追問時可以補：LLM 裁判本身有偏差，要拿人工標註的樣本校準它，確認一致率夠高，也要定期抽查。</li><li>被追問時可以補：線上抓到的真實失敗案例要補進測試集，測試集才會越來越貼近真實使用。</li><li>被追問時可以補：評測本身也要花錢，所以測試集要精選、分層，重要題目多跑幾次，一般題目少跑。</li></ul></div></section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="rag.html"><span>← 上一題</span><b>RAG 檢索</b></a><a class="pg next" href="hooks.html"><span>下一題 →</span><b>Hooks</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { tokens, fmt, usd, esc, jsonHTML, cost, $, $$ } = Lab;
+
+const LEN_LIMIT = 36;       // 回答長度合格線（tokens，示意）
+const FAITH_MIN = 0.95;     // 上線判準：faithfulness 下限
+const EPS = 0.05;           // 綜合分差距超過這個值才算進步／退步
+const TOOLS = ['search_kb', 'get_order_status', 'cancel_order', 'none'];
+const MET = [
+  { k: 'faith', name: 'faithfulness（有沒有亂編）', by: 'LLM 裁判' },
+  { k: 'cov', name: '涵蓋關鍵事實', by: 'LLM 裁判' },
+  { k: 'tool', name: '工具呼叫正確率', by: '規則檢查' },
+  { k: 'fmt', name: '格式正確', by: '規則檢查' },
+  { k: 'len', name: '回答長度（≤ ' + LEN_LIMIT + ' tokens）', by: '規則檢查' }
+];
+const P = '您好，感謝來信！';
+const v = (t, f, tool, fmtOk, h) => ({ t, f, tool: tool || 'search_kb', fmt: fmtOk === 0 ? 0 : 1, h: h || '' });
+
+// 預先寫好的樣本：每題每版有幾種回答型態（a、b、c…），pat 是五次執行各自落在哪一種
+const CASES0 = [
+  { id: 'C1', q: '商品拆封後還能退貨嗎？', facts: ['到貨七日內可申請退貨', '已拆封的食品不適用', '申請時需附訂單編號'], tool: 'search_kb', crit: false,
+    A: { pat: 'acaba', vars: {
+      a: v(P + '到貨七日內可申請退貨，但已拆封的食品不適用。', [0, 1]),
+      b: v(P + '拆封後一律不能退貨，且退貨運費由您負擔。', [], 'search_kb', 1, '拆封後一律不能退貨；運費由您負擔'),
+      c: v(P + '七日內可退貨，申請時請準備訂單編號。', [0, 2], 'search_kb', 0) } },
+    B: { pat: 'aaaaa', vars: { a: v('到貨七日內可申請退貨；已拆封的食品不適用，需附訂單編號。', [0, 1, 2]) } } },
+  { id: 'C2', q: '退貨後多久會收到退款？', facts: ['三到七個工作天內退款', '退回原付款方式'], tool: 'search_kb', crit: false,
+    A: { pat: 'aabaa', vars: {
+      a: v(P + '退貨商品檢查無誤後，三到七個工作天退回原付款方式。', [0, 1]),
+      b: v(P + '約三到七個工作天，實際依銀行作業為準。', [0], 'search_kb', 0) } },
+    B: { pat: 'aaaba', vars: {
+      a: v('檢查無誤後三到七個工作天，退回原付款方式。', [0, 1]),
+      b: v('檢查無誤後三到七個工作天退款。', [0]) } } },
+  { id: 'C3', q: '幫我查訂單 A10234 現在到哪了？', facts: ['訂單目前配送中', '預計明日到貨'], tool: 'get_order_status', crit: true,
+    A: { pat: 'aaaaa', vars: { a: v(P + '訂單 A10234 目前配送中，預計明日到貨。', [0, 1], 'get_order_status') } },
+    B: { pat: 'aaaaa', vars: { a: v('訂單 A10234 配送中，預計明日到貨。', [0, 1], 'get_order_status') } } },
+  { id: 'C4', q: '我要取消訂單 A10277', facts: ['確認訂單尚未出貨', '取消後三日內退款'], tool: 'cancel_order', crit: true,
+    A: { pat: 'aaaaa', vars: { a: v(P + '訂單 A10277 尚未出貨，已取消，三日內退款。', [0, 1], 'cancel_order') } },
+    B: { pat: 'abbab', vars: {
+      a: v('訂單 A10277 尚未出貨，已為您取消，三日內退款。', [0, 1], 'cancel_order'),
+      b: v('建議您到會員中心「我的訂單」自行取消。', [], 'search_kb') } } },
+  { id: 'C5', q: '你們有賣二手手機嗎？', facts: ['規章未提及，不猜測', '引導聯絡真人客服'], tool: 'search_kb', crit: false,
+    A: { pat: 'abaab', vars: {
+      a: v(P + '我們有賣二手手機，價格約三千元起。', [], 'none', 1, '有賣二手手機；價格約三千元起'),
+      b: v(P + '規章中沒有提到這項商品，建議聯絡真人客服。', [0, 1]) } },
+    B: { pat: 'aaaaa', vars: { a: v('規章沒有提到這項商品，請聯絡真人客服。', [0, 1]) } } },
+  { id: 'C6', q: '電子發票退貨要怎麼處理？', facts: ['電子發票同步作廢', '重開折讓單'], tool: 'search_kb', crit: false,
+    A: { pat: 'abaab', vars: {
+      a: v(P + '電子發票會同步作廢，並重開折讓單。', [0, 1]),
+      b: v(P + '電子發票會同步作廢，並重開折讓單。', [0, 1], 'none') } },
+    B: { pat: 'aaaba', vars: {
+      a: v('電子發票會同步作廢並重開折讓單。', [0, 1]),
+      b: v('電子發票退貨後會直接退現金給您。', [], 'search_kb', 1, '直接退現金') } } }
+];
+
+const st = { view: 'B', metrics: { faith: true, cov: true, tool: true, fmt: true, len: true }, n: 1 };
+
+function readCases() {
+  return CASES0.map((c, i) => ({
+    ...c,
+    inc: $('#inc-' + i).checked,
+    q: $('#q-' + i).value,
+    facts: $('#f-' + i).value.split('\n').map(s => s.trim()).filter(Boolean),
+    tool: $('#t-' + i).value,
+    crit: $('#c-' + i).checked
+  }));
+}
+
+function evalRun(c, ver, r) {
+  const d = c[ver];
+  const key = d.pat[r];
+  const x = d.vars[key];
+  const hit = x.f.filter(i => i < c.facts.length);
+  const m = {
+    faith: x.h ? 0 : 1,
+    cov: c.facts.length ? hit.length / c.facts.length : 1,
+    tool: x.tool === c.tool ? 1 : 0,
+    fmt: x.fmt,
+    len: tokens(x.t) <= LEN_LIMIT ? 1 : 0
+  };
+  const on = MET.filter(e => st.metrics[e.k]);
+  const score = on.length ? on.reduce((a, e) => a + m[e.k], 0) / on.length : null;
+  const missing = c.facts.filter((_, i) => hit.indexOf(i) < 0);
+  const reason = (x.h ? '判定不忠實：「' + x.h + '」在知識庫檢索結果中找不到依據。' : '回答的主張都有檢索結果支持。') +
+    (missing.length ? '漏掉的關鍵事實：' + missing.join('、') + '。' : '關鍵事實都答到。');
+  return { key, x, hit, m, score, tok: tokens(x.t), reason, run: r + 1 };
+}
+
+function evalVer(cases, ver, N) {
+  const per = cases.map(c => {
+    const runs = [];
+    for (let r = 0; r < N; r++) runs.push(evalRun(c, ver, r));
+    const sc = runs.every(x => x.score == null) ? null : runs.reduce((a, x) => a + x.score, 0) / runs.length;
+    const cnt = {}; runs.forEach(x => { cnt[x.key] = (cnt[x.key] || 0) + 1; });
+    const agree = Math.max(...Object.keys(cnt).map(k => cnt[k])) / runs.length;
+    return { c, runs, score: sc, agree };
+  });
+  const all = [].concat(...per.map(p => p.runs));
+  const mean = k => all.length ? all.reduce((a, x) => a + x.m[k], 0) / all.length : 0;
+  const metric = {}; MET.forEach(e => { metric[e.k] = mean(e.k); });
+  const scored = per.filter(p => p.score != null);
+  const overall = scored.length ? scored.reduce((a, p) => a + p.score, 0) / scored.length : null;
+  const avgTok = all.length ? all.reduce((a, x) => a + x.tok, 0) / all.length : 0;
+  return { per, metric, overall, avgTok };
+}
+
+const pct = x => (x == null ? '—' : Math.round(x * 100) + '%');
+
+function render() {
+  const N = +$('#runs').value;
+  $('#runs-v').textContent = N;
+  const cases = readCases().filter(c => c.inc);
+  $$('#ver button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === st.view));
+  $$('#metrics button').forEach(b => b.setAttribute('aria-pressed', !!st.metrics[b.dataset.m]));
+  const anyMet = MET.some(e => st.metrics[e.k]);
+  if (!cases.length) {
+    $('#stats').innerHTML = ''; $('#cmp').innerHTML = ''; $('#mtbl').innerHTML = ''; $('#detail').innerHTML = ''; $('#json').textContent = ''; $('#rec').innerHTML = '';
+    $('#verdict').innerHTML = '<div class="note warn">請至少勾選一題納入評測。</div>';
+    return;
+  }
+  const A = evalVer(cases, 'A', N), B = evalVer(cases, 'B', N);
+  $('#hint').textContent = cases.length + ' 題 × ' + N + ' 次 × 2 個版本 ＝ ' + (cases.length * N * 2) + ' 次 agent 呼叫';
+
+  // cost of the eval itself (illustrative)
+  const calls = cases.length * N * 2;
+  const judgeOn = st.metrics.faith || st.metrics.cov;
+  const evalCost = cost({ input: calls * 850 + (judgeOn ? calls * 600 : 0), output: calls * 70 + (judgeOn ? calls * 80 : 0) });
+
+  // per-case compare
+  const cmp = B.per.map((pb, i) => {
+    const pa = A.per[i];
+    let kind = 'same';
+    if (pa.score != null && pb.score != null) { const d = pb.score - pa.score; kind = d > EPS ? 'imp' : d < -EPS ? 'reg' : 'same'; }
+    return { c: pb.c, a: pa, b: pb, kind };
+  });
+  const regs = cmp.filter(x => x.kind === 'reg');
+  const critReg = regs.filter(x => x.c.crit);
+
+  const delta = (A.overall != null && B.overall != null) ? B.overall - A.overall : null;
+  $('#stats').innerHTML =
+    '<div class="stat"><div class="v">' + pct(A.overall) + '</div><div class="l">版本 A 綜合分</div></div>' +
+    '<div class="stat"><div class="v">' + pct(B.overall) + '</div><div class="l">版本 B 綜合分</div></div>' +
+    '<div class="stat"><div class="v">' + (delta == null ? '—' : (delta >= 0 ? '+' : '') + Math.round(delta * 100) + ' 點') + '</div><div class="l">B 相對 A</div></div>' +
+    '<div class="stat"><div class="v">' + usd(evalCost) + '</div><div class="l">這次評測成本（示意）</div></div>';
+
+  // verdict
+  if (!anyMet) {
+    $('#verdict').innerHTML = '<div class="note warn">還沒開啟任何指標，無法評分。請在左邊至少開啟一個指標。</div>';
+  } else {
+    const faithOn = st.metrics.faith;
+    const f = B.metric.faith;
+    const c1 = faithOn && f >= FAITH_MIN;
+    const c2 = critReg.length === 0;
+    const ok = c1 && c2;
+    const li = [
+      '<li>' + (c1 ? '✓' : '✗') + ' 版本 B 的 faithfulness ≥ ' + Math.round(FAITH_MIN * 100) + '%：' + (faithOn ? '目前 ' + pct(f) : '這個指標被關掉了，沒有數字就不能放行') + '</li>',
+      '<li>' + (c2 ? '✓' : '✗') + ' 重要題目沒有退步：' + (c2 ? '沒有退步' : '退步的是 ' + esc(critReg.map(x => x.c.id + '（' + x.c.q + '）').join('、'))) + '</li>'
+    ];
+    const warn = N < 3 ? '<div class="small"><b>注意：</b>只跑了 ' + N + ' 次，偶然的好壞可能掩蓋問題；把「每題跑幾次」拉到 3 以上再判斷。</div>' : '';
+    const extra = (delta != null && delta > 0 && regs.length) ? '<div class="small">B 的平均分數比 A 高，但有 ' + regs.length + ' 題退步。平均變好不能抵銷重要題目的退步。</div>' : '';
+    $('#verdict').innerHTML = '<div class="verdict ' + (ok ? 'ok' : 'bad') + '"><div class="big">' + (ok ? '可以上線' : '不行，先不要上線') + '</div><ul>' + li.join('') + '</ul>' + extra + warn + '</div>';
+  }
+
+  // comparison table
+  $('#cmp').innerHTML = '<table><thead><tr><th>題目</th><th class="num">A</th><th class="num">B</th><th>變化</th><th class="num">一致性 A</th><th class="num">一致性 B</th></tr></thead><tbody>' + cmp.map(x => {
+    const chip = x.kind === 'imp' ? '<span class="chip ok">進步</span>' : x.kind === 'reg' ? '<span class="chip bad">退步' + (x.c.crit ? '（重要題）' : '') + '</span>' : '<span class="chip">持平</span>';
+    return '<tr class="' + x.kind + '"><td class="q"><b>' + esc(x.c.id) + '</b> ' + esc(x.c.q) + (x.c.crit ? ' <span class="chip accent">重要</span>' : '') + '</td><td class="num">' + pct(x.a.score) + '</td><td class="num">' + pct(x.b.score) + '</td><td>' + chip + '</td><td class="num">' + pct(x.a.agree) + '</td><td class="num">' + pct(x.b.agree) + '</td></tr>';
+  }).join('') + '</tbody></table>';
+
+  // metric table
+  $('#mtbl').innerHTML = '<table><thead><tr><th>指標</th><th>判定方式</th><th class="num">A</th><th class="num">B</th></tr></thead><tbody>' + MET.map(e => {
+    const on = st.metrics[e.k];
+    const extra = e.k === 'len' ? '<br><span class="muted small">平均 A ' + fmt(A.avgTok) + '／B ' + fmt(B.avgTok) + ' tokens</span>' : '';
+    return '<tr class="' + (on ? '' : 'off') + '"><td>' + esc(e.name) + (on ? '' : '（未納入）') + extra + '</td><td>' + e.by + '</td><td class="num">' + pct(A.metric[e.k]) + '</td><td class="num">' + pct(B.metric[e.k]) + '</td></tr>';
+  }).join('') + '</tbody></table>';
+
+  // per-run detail for the viewed version
+  const V = st.view === 'A' ? A : B;
+  $('#det-sub').textContent = '目前檢視：版本 ' + st.view + (st.view === 'A' ? '（舊 prompt）' : '（新 prompt）');
+  $('#detail').innerHTML = V.per.map(p => {
+    const head = '<div class="hd">' + esc(p.c.id) + '　' + esc(p.c.q) + '　<span class="chip">綜合 ' + pct(p.score) + '</span> <span class="chip ' + (p.agree < 1 ? 'warn' : 'ok') + '">一致性 ' + pct(p.agree) + '</span></div>';
+    return '<div class="cs">' + head + p.runs.map(x => {
+      const good = x.m.faith === 1 && x.m.cov === 1 && x.m.tool === 1;
+      const facts = p.c.facts.map((f, i) => '<span class="chip ' + (x.hit.indexOf(i) >= 0 ? 'ok' : 'bad') + '">' + (x.hit.indexOf(i) >= 0 ? '✓ ' : '✗ ') + esc(f) + '</span>').join('');
+      const tool = '<span class="chip ' + (x.m.tool ? 'ok' : 'bad') + '">工具 ' + esc(x.x.tool) + (x.m.tool ? '' : '（應為 ' + esc(p.c.tool) + '）') + '</span>';
+      const fm = x.m.fmt ? '' : '<span class="chip bad">格式錯誤</span>';
+      const h = x.x.h ? '<span class="chip bad">亂編</span> <span class="small" style="color:var(--bad)">「' + esc(x.x.h) + '」</span>' : '';
+      return '<div class="rn ' + (good ? 'good' : 'bad') + '"><div><b>第 ' + x.run + ' 次</b>　' + esc(x.x.t) + ' <span class="muted">(' + x.tok + ' tok)</span></div><div class="chips">' + tool + fm + facts + '</div>' + (h ? '<div>' + h + '</div>' : '') + '</div>';
+    }).join('') + '</div>';
+  }).join('');
+
+  // record selector + JSON
+  const sel = $('#rec');
+  const prev = sel.value;
+  const opts = [];
+  V.per.forEach(p => p.runs.forEach(x => opts.push({ val: p.c.id + '|' + x.run, label: p.c.id + '　第 ' + x.run + ' 次　' + p.c.q })));
+  sel.innerHTML = opts.map(o => '<option value="' + esc(o.val) + '">' + esc(o.label) + '</option>').join('');
+  const want = opts.some(o => o.val === prev) ? prev : (opts.some(o => o.val === 'C4|2') ? 'C4|2' : opts[0].val);
+  sel.value = want;
+  const [cid, rn] = want.split('|');
+  const pp = V.per.find(p => p.c.id === cid), xx = pp.runs[+rn - 1];
+  const sources = xx.m.fmt ? ['kb:' + (pp.c.tool === 'search_kb' ? 'faq-' + cid.toLowerCase() : pp.c.tool)] : null;
+  const rec = {
+    case_id: pp.c.id, version: st.view, run: xx.run,
+    input: { question: pp.c.q, expected_facts: pp.c.facts, expected_tool: pp.c.tool },
+    output: { answer: xx.x.t, tool_called: xx.x.tool, sources },
+    scores: { faithfulness: xx.m.faith, fact_coverage: +xx.m.cov.toFixed(2), tool_correct: xx.m.tool === 1, format_ok: xx.m.fmt === 1, length_tokens: xx.tok, length_ok: xx.m.len === 1 },
+    judge_reason: xx.reason,
+    judge_model: 'judge-model-x'
+  };
+  $('#json').innerHTML = jsonHTML(rec, { clip: 200 });
+}
+
+// build controls
+$('#metrics').innerHTML = MET.map(e => '<button type="button" class="btn" data-m="' + e.k + '" aria-pressed="true">' + esc(e.name) + '</button>').join('');
+$$('#metrics button').forEach(b => b.addEventListener('click', () => { st.metrics[b.dataset.m] = !st.metrics[b.dataset.m]; render(); }));
+$$('#ver button').forEach(b => b.addEventListener('click', () => { st.view = b.dataset.v; render(); }));
+$('#cases').innerHTML = CASES0.map((c, i) =>
+  '<details class="case"' + (i === 3 ? ' open' : '') + '><summary>' + c.id + '　' + esc(c.q) + (c.crit ? '（重要）' : '') + '</summary><div class="in">' +
+  '<label class="check"><input type="checkbox" id="inc-' + i + '" checked> <span>納入評測</span></label>' +
+  '<div class="field"><label for="q-' + i + '">問題</label><input type="text" id="q-' + i + '"></div>' +
+  '<div class="field"><label for="f-' + i + '">預期關鍵事實（一行一個）</label><textarea id="f-' + i + '" rows="3"></textarea></div>' +
+  '<div class="field"><label for="t-' + i + '">預期要呼叫的工具</label><select id="t-' + i + '">' + TOOLS.map(t => '<option value="' + t + '">' + t + '</option>').join('') + '</select></div>' +
+  '<label class="check"><input type="checkbox" id="c-' + i + '"> <span>重要題目（不能退步）</span></label>' +
+  '</div></details>').join('');
+CASES0.forEach((c, i) => { $('#q-' + i).value = c.q; $('#f-' + i).value = c.facts.join('\n'); $('#t-' + i).value = c.tool; $('#c-' + i).checked = c.crit; });
+$$('textarea, input, select').forEach(el => { el.addEventListener('input', render); el.addEventListener('change', render); });
+$('#go').addEventListener('click', () => {
+  const N = +$('#runs').value, n = readCases().filter(c => c.inc).length;
+  st.n++;
+  $('#log').textContent = '評測 #' + st.n + ' 完成：' + (n * N * 2) + ' 次 agent 呼叫，結果已更新（示意：樣本固定，真實評測每次會略有不同）。';
+  render();
+});
+$('#log').textContent = '評測 #1 已完成，結果如右。';
+render();
+</script>
+</body>
+</html>

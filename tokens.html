@@ -93,6 +93,31 @@
   </section>
 </main>
 
+<section class="wrap" style="margin-top:18px">
+  <div class="pane">
+    <header><h2>中文和英文的 token 比較</h2><span class="hint">同一句話，兩種寫法</span></header>
+    <div class="body">
+      <div class="field">
+        <label for="cmp-zh">中文</label>
+        <textarea id="cmp-zh" rows="3">請檢查 OrderService 的刪除流程，找出庫存結餘沒有回補的原因，修好之後補上單元測試。</textarea>
+      </div>
+      <div class="field">
+        <label for="cmp-en">English</label>
+        <textarea id="cmp-en" rows="3">Check the delete flow in OrderService, find why the stock balance is not restored, fix it, and add a unit test.</textarea>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="cmp-zh-t">0</div><div class="l">中文 token</div></div>
+        <div class="stat"><div class="v" id="cmp-en-t">0</div><div class="l">英文 token</div></div>
+        <div class="stat"><div class="v" id="cmp-zh-c">0</div><div class="l">中文字元數</div></div>
+        <div class="stat"><div class="v" id="cmp-en-c">0</div><div class="l">英文字元數</div></div>
+        <div class="stat"><div class="v" id="cmp-zh-r">0</div><div class="l">中文 token／字元</div></div>
+        <div class="stat"><div class="v" id="cmp-en-r">0</div><div class="l">英文 token／字元</div></div>
+      </div>
+      <p class="disclaimer">這裡的數字都是估算，不是真正的 tokenizer。一般來說，中日韓文字每個字元花的 token 比英文多，但中文同樣的意思字數少，整句不一定比較貴。省 token 的做法是把重複的長規則寫在檔案裡，讓快取命中。不要為了省 token 把指令寫得不清楚，清楚比省幾個 token 重要。</p>
+    </div>
+  </div>
+</section>
+
 <section class="wrap takeaways">
   <div class="box">
     <h2>看完要記得</h2>
@@ -104,6 +129,8 @@
     </ul>
   </div>
 </section>
+
+<section class="wrap oral"><div class="box"><h2>口試怎麼答（約 30 秒）</h2><p class="say">一次請求的 token 分成輸入和輸出兩邊。輸入是每次都整包重送的內容，包含 system prompt、工具定義、對話歷史和這一輪的訊息。輸出是模型這次產生的東西，包含看不到全文的思考，也包含它要呼叫工具的那段文字。API 不會記得上一輪，所以對話越長，每一輪就越貴。</p><ul class="more"><li>被追問時可以補：輸出單價通常是輸入的好幾倍，思考 token 也按輸出價算。</li><li>工具讀進來的大檔案會留在歷史裡，之後每一輪都要再付一次。</li><li>計費通常分成四種：沒命中快取的輸入、寫入快取、讀取快取和輸出。</li></ul></div></section>
 
 <nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="index.html"><span>← 回首頁</span><b>Agent 實驗室</b></a><a class="pg next" href="effort.html"><span>下一題 →</span><b>Reasoning Effort</b></a></nav>
 
@@ -259,6 +286,19 @@ $$('[data-view]').forEach(b => b.addEventListener('click', () => {
 }));
 $$('textarea, input').forEach(el => el.addEventListener('input', render));
 render();
+</script>
+<script>
+(function () {
+  const L = Lab, zh = L.$('#cmp-zh'), en = L.$('#cmp-en');
+  function one(el, p) {
+    const c = el.value.length, t = L.tokens(el.value);
+    L.$('#cmp-' + p + '-t').textContent = L.fmt(t);
+    L.$('#cmp-' + p + '-c').textContent = L.fmt(c);
+    L.$('#cmp-' + p + '-r').textContent = c ? (t / c).toFixed(2) : '0';
+  }
+  function upd() { one(zh, 'zh'); one(en, 'en'); }
+  zh.addEventListener('input', upd); en.addEventListener('input', upd); upd();
+})();
 </script>
 </body>
 </html>
