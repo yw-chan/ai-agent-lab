@@ -125,6 +125,37 @@
   </div>
 </section>
 
+<section class="wrap" style="padding-bottom:20px">
+  <div class="pane">
+    <header><h2>怎麼知道它們什麼時候被呼叫？</h2><span class="hint">三種都是模型自己判斷要不要用</span></header>
+    <div class="body">
+      <div class="tbl"><table>
+        <thead><tr><th></th><th>什麼時候載入</th><th>什麼時候呼叫</th><th>誰決定</th></tr></thead>
+        <tbody>
+          <tr><th>Tool</th><td>每一輪都在（工具定義常駐上下文）</td><td>模型判斷「這件事需要動手」，例如讀檔、跑指令</td><td>模型，看工具的 description</td></tr>
+          <tr><th>MCP</th><td><strong>啟動 session 時</strong>連到 MCP server，取得工具清單（只做一次）</td><td>跟 Tool 一樣；名稱像 <code>mcp__tfs__wi_list</code></td><td>模型</td></tr>
+          <tr><th>Skill</th><td>啟動時<strong>只載入名稱和一句描述</strong></td><td>① 模型判斷任務符合描述，呼叫 Skill 工具載入全文 ② 你自己打 <code>/skill名稱</code></td><td>模型或你</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small" style="margin:0">模型<strong>只會「要求」呼叫</strong>，真正執行的是你電腦上的 Agent（例如 Claude Code）。</p>
+
+      <div class="tbl"><table>
+        <thead><tr><th>在 Claude Code 怎麼看</th><th>看到什麼</th></tr></thead>
+        <tbody>
+          <tr><td>對話畫面本身</td><td>每次呼叫都會顯示一行，例如 <code>● Bash(git status)</code>、<code>● tfs - wi_list (MCP)</code>、<code>● Skill(code-review)</code></td></tr>
+          <tr><td><code>Ctrl + O</code></td><td>展開詳細內容：送了什麼參數、回了什麼結果</td></tr>
+          <tr><td><code>/mcp</code></td><td>連了哪些 MCP server、連線狀態、各自提供哪些工具</td></tr>
+          <tr><td><code>/context</code></td><td>上下文裡各部分佔多少 token：系統工具、MCP 工具、Skill 描述、CLAUDE.md、對話</td></tr>
+          <tr><td>Hooks（<code>PreToolUse</code>）</td><td>每次呼叫工具前自動執行，可以記錄或攔截；matcher 設 <code>mcp__.*</code> 就能記下所有 MCP 呼叫</td></tr>
+          <tr><td>直接用 API</td><td>回應的 <code>stop_reason</code> 是 <code>"tool_use"</code>，<code>content</code> 裡有 <code>tool_use</code> 區塊</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="note"><strong>想讓它一定被呼叫：</strong>把 description 寫清楚（模型靠它選工具）；直接說「用 tfs 工具查」；Skill 可以直接打 <code>/code-review</code>；用不到的 MCP 先關掉，工具太多比較容易選錯，也浪費 token。</div>
+    </div>
+  </div>
+</section>
+
 <section class="wrap takeaways">
   <div class="box">
     <h2>看完要記得</h2>
