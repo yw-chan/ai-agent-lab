@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>工具呼叫實驗：Tool、MCP、Skill</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .lanes-wrap { overflow-x: auto; }
+  .lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 8px; min-width: 540px; }
+  .lane-h { font-size: 12px; font-weight: 700; padding: 6px 8px; border-bottom: 3px solid var(--line); color: var(--muted); }
+  .lane-h.model { border-color: var(--seg-system); }
+  .lane-h.agent { border-color: var(--seg-tools); }
+  .lane-h.ext { border-color: var(--seg-history); }
+  .cell { padding: 4px 0 4px 6px; border-left: 1px dashed var(--line); min-height: 6px; }
+  .card { display: grid; gap: 2px; text-align: left; width: 100%; font: inherit; font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; color: var(--ink); cursor: pointer; }
+  .card:hover { border-color: var(--accent); }
+  .card.active { border-color: var(--accent); background: var(--accent-soft); }
+  .card .n { font-family: var(--f-mono); font-size: 11px; color: var(--accent); }
+  .card .d { color: var(--muted); font-size: 12px; }
+  .step-label { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .uses { display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 5</span><span>面試 6</span></div>
+  <h1>工具呼叫實驗：Tool、MCP、Skill</h1>
+  <p class="lede">模型在遠端，怎麼操作你電腦上的檔案和系統？左邊選一句話、決定有哪些工具；按「下一步」，右邊一格一格看到：誰在哪裡做了什麼、實際送出與回傳的 JSON，以及 token 用在哪。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>你的環境與提問</h2><span class="hint">改動會從頭重跑</span></header>
+    <div class="body">
+      <fieldset class="field" style="border:0;padding:0;margin:0">
+        <legend class="label" style="padding:0;font-size:13px;font-weight:500">你對 Agent 說</legend>
+        <label class="check"><input type="radio" name="preset" value="0" checked> <span>「列出這週我負責的工作項目」<br><span class="sub">需要 MCP 工具</span></span></label>
+        <label class="check"><input type="radio" name="preset" value="1"> <span>「幫我看 OrderService.cs 哪裡有問題」<br><span class="sub">需要內建 Read</span></span></label>
+        <label class="check"><input type="radio" name="preset" value="2"> <span>「幫我做 code review」<br><span class="sub">需要 Skill（再加 Bash 取得 diff）</span></span></label>
+      </fieldset>
+
+      <div class="field">
+        <span class="label">內建工具</span>
+        <label class="check"><input type="checkbox" id="t-read" checked> <span>Read：讀取檔案</span></label>
+        <label class="check"><input type="checkbox" id="t-bash" checked> <span>Bash：執行指令</span></label>
+        <label class="check"><input type="checkbox" id="t-edit"> <span>Edit：修改檔案</span></label>
+      </div>
+
+      <div class="field">
+        <span class="label">MCP server</span>
+        <label class="check"><input type="checkbox" id="t-mcp" checked> <span>連上 MCP server「tfs」<br><span class="sub">提供 wi_list、wi_view、pr_list</span></span></label>
+      </div>
+
+      <div class="field">
+        <span class="label">已安裝的 Skills</span>
+        <label class="check"><input type="checkbox" id="k-code-review" checked> <span><b>code-review</b><br><span class="sub">審查目前 git diff 的錯誤、安全與風格；使用者要 code review 時使用</span></span></label>
+        <label class="check"><input type="checkbox" id="k-deploy" checked> <span><b>deploy</b><br><span class="sub">依團隊清單部署到 staging 或 production；只有使用者要部署時才用</span></span></label>
+      </div>
+
+      <div id="uses" class="uses"></div>
+
+      <div class="row">
+        <button class="btn primary" type="button" data-act="next">下一步 ▶</button>
+        <button class="btn" type="button" data-act="prev">◀ 上一步</button>
+        <button class="btn" type="button" data-act="reset">從頭開始</button>
+      </div>
+      <p class="disclaimer">所有數字（token、檔案內容、工作項目）都是示意用的假資料，目的是看出流程與相對大小，不是真實量測。token 為依字數估算。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header>
+      <h2>實際發生的事</h2>
+      <span class="hint" id="progress"></span>
+    </header>
+    <div class="body">
+      <div class="lanes-wrap" tabindex="0" aria-label="三條泳道的循序圖，可左右捲動">
+        <div class="lanes" id="lanes"></div>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" type="button" data-act="next">下一步 ▶</button>
+        <button class="btn" type="button" data-act="reset">從頭開始</button>
+        <label class="check" style="margin-left:auto"><input type="checkbox" id="fold"> <span class="small">只看 messages（收合 system、tools）</span></label>
+      </div>
+
+      <div>
+        <div class="small muted" style="margin-bottom:6px">目前這一次 request 的輸入 token（<span id="req-name">—</span>）</div>
+        <div id="tbar"></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-in">0</div><div class="l">request 輸入 token</div></div>
+        <div class="stat"><div class="v" id="s-tools">0</div><div class="l">工具定義（每輪都送）</div></div>
+        <div class="stat"><div class="v" id="s-desc">0</div><div class="l">Skill 描述（平常）</div></div>
+        <div class="stat"><div class="v" id="s-skill">0</div><div class="l">Skill 全文（載入後）</div></div>
+      </div>
+      <div id="notes" class="steps" style="display:grid"></div>
+      <div>
+        <div class="small muted" style="margin-bottom:6px" id="json-label"></div>
+        <pre class="code" id="json" tabindex="0"></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap" style="padding-bottom:20px">
+  <div class="pane">
+    <header><h2>Tool、MCP、Skill 比較</h2></header>
+    <div class="body">
+      <div class="tbl"><table>
+        <thead><tr><th></th><th>本質</th><th>解決什麼</th><th>上下文成本</th><th>例子</th></tr></thead>
+        <tbody>
+          <tr><th>Tool</th><td>有名稱、說明、參數 schema 的函式；由本機 Agent 負責執行</td><td>讓模型能「動手」：讀檔、跑指令、改檔</td><td>每個工具的定義每一輪都送，約百餘到數百 token／個</td><td><code>Read</code>、<code>Bash</code>、<code>Edit</code></td></tr>
+          <tr><th>MCP</th><td>工具的標準接口（JSON-RPC）；工具由獨立的 server 提供，Agent 是 client</td><td>不必為每個 Agent 重寫整合，直接接公司系統</td><td>和一般工具相同：定義每輪都送；對模型來說它就是工具</td><td><code>mcp__tfs__wi_list</code></td></tr>
+          <tr><th>Skill</th><td>一個資料夾，核心是 SKILL.md（做事流程與腳本）；用到才載入</td><td>教模型「怎麼做」一件事，不必每次都貼流程</td><td>平常只佔名稱加一句描述；被呼叫後全文才進 context（數千 token）</td><td><code>code-review</code>、<code>deploy</code></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li>模型只輸出<strong>結構化的呼叫要求</strong>（<code>stop_reason: "tool_use"</code>），真正執行的是你電腦上的 Agent；結果再用 <code>tool_result</code> 送回去。</li>
+      <li><strong>description 寫得好壞，決定模型選對工具</strong>：模型只看得到名稱、說明和參數 schema。</li>
+      <li><strong>MCP 對模型來說就是工具</strong>：只是多了一層標準協定，改名成 <code>mcp__server__tool</code> 後塞進同一個 tools 陣列。</li>
+      <li><strong>Skill 平常只佔一句描述</strong>（漸進揭露）；被用到時全文才注入，之後每一輪都要重送。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="context.html"><span>← 上一題</span><b>Context Window</b></a><a class="pg next" href="memory.html"><span>下一題 →</span><b>長任務記憶</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { tokens, fmt, jsonHTML, bar, esc, $, $$ } = Lab;
+
+const MODEL = 'claude-sonnet-x';
+const BASE = '你是 Claude Code，協助使用者在目前的專案資料夾裡做軟體工程工作。需要讀檔、改檔、執行指令時請呼叫工具；有副作用的指令，Agent 會先詢問使用者。';
+const BASE_EXTRA = 1800;        // platform default instructions (illustrative)
+const TOOL_OVERHEAD = 350;      // fixed instructions the platform adds when tools are present
+
+const BUILTIN = {
+  read: { name: 'Read', description: 'Read a file from the local filesystem. Returns the file content with line numbers.', input_schema: { type: 'object', properties: { file_path: { type: 'string', description: 'Absolute path' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['file_path'] } },
+  bash: { name: 'Bash', description: 'Run a shell command and return stdout and stderr. Use for git, build and test commands.', input_schema: { type: 'object', properties: { command: { type: 'string' }, timeout: { type: 'integer' } }, required: ['command'] } },
+  edit: { name: 'Edit', description: 'Replace an exact string in a file. old_string must be unique in the file.', input_schema: { type: 'object', properties: { file_path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' } }, required: ['file_path', 'old_string', 'new_string'] } }
+};
+const MCP_DEFS = [
+  { name: 'wi_list', description: 'List TFS work items. Filter by assigned_to, iteration and state. Returns id, title and state for each item.', schema: { type: 'object', properties: { assigned_to: { type: 'string', description: 'User name or @me' }, iteration: { type: 'string', description: 'Iteration path or @CurrentIteration' }, state: { type: 'string', enum: ['Active', 'Closed', 'All'] } } } },
+  { name: 'wi_view', description: 'View one TFS work item in full, including description and comments.', schema: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] } },
+  { name: 'pr_list', description: 'List TFS pull requests. Filter by status and creator.', schema: { type: 'object', properties: { status: { type: 'string', enum: ['active', 'completed', 'abandoned'] }, creator: { type: 'string' } } } }
+];
+const MCP_TOOLS = MCP_DEFS.map(d => ({ name: 'mcp__tfs__' + d.name, description: d.description, input_schema: d.schema }));
+const SKILL_TOOL = { name: 'Skill', description: 'Load a skill by name. The available skills are listed in the system prompt. Returns the full SKILL.md instructions.', input_schema: { type: 'object', properties: { skill: { type: 'string', description: 'Skill name' } }, required: ['skill'] } };
+
+const SKILLS = {
+  'code-review': {
+    desc: 'Review the current git diff for bugs, security issues and style. Use when the user asks for a code review.',
+    tok: 2400,
+    md: '---\nname: code-review\ndescription: Review the current git diff for bugs, security issues and style.\n---\n# Code Review 流程\n1. 執行 git diff main...HEAD 取得變更\n2. 逐檔檢查：邏輯錯誤、空值、交易邊界、SQL 注入、命名\n3. 依嚴重度分為「必修／建議／小事」\n4. 專案規範：Controller 不得直接使用 DbContext\n5. 輸出：每項附檔名與行號、一句理由、建議修法\n（以下還有範例、檢查清單與排除規則，SKILL.md 全文約 9 KB）'
+  },
+  'deploy': {
+    desc: 'Deploy the app to staging or production following the team checklist. Use only when the user asks to deploy.',
+    tok: 1800,
+    md: '---\nname: deploy\n---\n# 部署流程\n（部署清單全文）'
+  }
+};
+
+const PRESETS = [
+  { msg: '列出這週我負責的工作項目' },
+  { msg: '幫我看 OrderService.cs 哪裡有問題' },
+  { msg: '幫我做 code review' }
+];
+
+const WI_RESULT = JSON.stringify([
+  { id: 4127, title: '出庫單刪除後庫存結餘未回補', state: 'Active' },
+  { id: 4133, title: '盤點差異報表加上倉庫篩選', state: 'Active' },
+  { id: 4140, title: '補貨提醒 Job 逾時調查', state: 'Active' }
+]);
+const READ_RESULT = '  38  public async Task DeleteOrderAsync(int id)\n  39  {\n  40      var doc = await _db.Orders.Include(x => x.Items).FirstAsync(x => x.Id == id);\n  41      _db.Orders.Remove(doc);\n  42      await _db.SaveChangesAsync();\n  43      // TODO: 庫存回補\n  44  }\n  …（共 96 行）';
+const DIFF_RESULT = 'diff --git a/Services/OutboundService.cs b/Services/OutboundService.cs\n@@ -38,6 +38,9 @@ public async Task DeleteAsync(int id)\n-    _db.Outbounds.Remove(doc);\n+    _db.Outbounds.Remove(doc);\n+    // 沒有呼叫 StockService.Restore\n …（共 142 行變更）';
+
+function actionsFor(idx, s) {
+  if (idx === 0) return [{
+    ok: s.mcp, fail: '我目前沒有能查詢 TFS 的工具，沒辦法取得你的工作項目。請連上 tfs MCP server，或把清單貼給我。',
+    name: 'mcp__tfs__wi_list', input: { assigned_to: '@me', iteration: '@CurrentIteration', state: 'Active' },
+    say: '我用 tfs 的工具查你這週的工作項目。',
+    exec: { lane: 'ext', title: 'MCP server 執行 wi_list', desc: 'Agent 去掉前綴，用 tools/call 轉給 tfs server', label: '本機：Agent ↔ MCP server（JSON-RPC over stdio）',
+      obj: { agent_to_server: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'wi_list', arguments: { assigned_to: '@me', iteration: '@CurrentIteration', state: 'Active' } } }, server_to_agent: { jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: WI_RESULT }], isError: false } } },
+      note: '注意 MCP server 收到的工具名是 wi_list；mcp__tfs__ 前綴是 Agent 為了避免撞名、在送給模型時才加的。' },
+    result: WI_RESULT, kind: 'msg',
+    final: '你這週有 3 個進行中的工作項目：#4127 出庫單刪除後庫存結餘未回補、#4133 盤點差異報表加上倉庫篩選、#4140 補貨提醒 Job 逾時調查。要我先看哪一個的細節？'
+  }];
+  if (idx === 1) return [{
+    ok: s.read, fail: '我沒有 Read 工具，看不到 OrderService.cs 的內容。請開啟內建的 Read，或把程式碼貼給我。',
+    name: 'Read', input: { file_path: 'D:/code/Shop/Services/OrderService.cs' },
+    say: '我先讀 OrderService.cs。',
+    exec: { lane: 'ext', title: '讀取本機檔案', desc: 'Agent 讀 OrderService.cs，加上行號', label: '本機：Agent 讀檔（不經過網路）',
+      obj: { agent_action: 'Read', file_path: 'D:/code/Shop/Services/OrderService.cs', lines_returned: 96, output: READ_RESULT },
+      note: '讀檔的是 Agent 這個程式，不是模型。檔案內容會變成 tool_result，留在歷史裡。' },
+    result: READ_RESULT, kind: 'msg',
+    final: 'DeleteOrderAsync 在第 41 行直接 Remove 訂單，第 43 行的「庫存回補」還是 TODO，所以刪單後庫存結餘不會恢復。建議在同一個交易內先呼叫 StockService.Restore，再刪除單據。'
+  }];
+  const sk = s.skills.includes('code-review');
+  return [{
+    ok: sk, fail: '我不知道你們團隊的 code review 流程，也沒有 diff 可看。我可以憑一般經驗審查，請先貼上要審查的 diff。',
+    name: 'Skill', input: { skill: 'code-review' },
+    say: '這是 code review 的需求，我先載入 code-review 這個 skill。',
+    exec: { lane: 'ext', title: '載入 SKILL.md 全文', desc: 'Agent 讀 SKILL.md，全文注入 context', label: '本機：Agent 讀取 skill 檔案',
+      obj: { agent_action: 'Skill', loaded_file: '~/.claude/skills/code-review/SKILL.md', size_bytes: 9216, approx_tokens: SKILLS['code-review'].tok, injected_as: 'tool_result' },
+      note: 'Skill 平常只有一句描述；現在全文被當成 tool_result 放進對話，輸入 token 立刻跳升。' },
+    result: SKILLS['code-review'].md, resultTok: SKILLS['code-review'].tok + 8, kind: 'skill'
+  }, {
+    ok: s.bash, fail: '已載入 code-review 流程，但我沒有 Bash 工具，無法取得 git diff。請開啟 Bash，或把 diff 貼給我。',
+    name: 'Bash', input: { command: 'git diff main...HEAD' },
+    say: '依 skill 的第 1 步，先取得變更內容。',
+    exec: { lane: 'ext', title: '執行 git diff', desc: 'Agent 先問你是否允許，再在本機執行', label: '本機：Agent 執行指令（Bash）',
+      obj: { agent_action: 'Bash', permission: '已向使用者確認', command: 'git diff main...HEAD', exit_code: 0, stdout: DIFF_RESULT },
+      note: '有副作用的指令，Agent 會先停下來問你。模型的「要求」不等於「已經執行」。' },
+    result: DIFF_RESULT, kind: 'msg',
+    final: '依 code-review 流程審查完成：【必修】OutboundService.DeleteAsync 刪單前沒有呼叫 StockService.Restore，庫存會失準；【建議】補上刪單後庫存回到原值的整合測試。'
+  }];
+}
+
+function readState() {
+  const skills = [];
+  if ($('#k-code-review').checked) skills.push('code-review');
+  if ($('#k-deploy').checked) skills.push('deploy');
+  return {
+    preset: +$('input[name="preset"]:checked').value,
+    read: $('#t-read').checked, bash: $('#t-bash').checked, edit: $('#t-edit').checked,
+    mcp: $('#t-mcp').checked, skills, fold: $('#fold').checked
+  };
+}
+
+function build(s) {
+  const tools = [];
+  if (s.read) tools.push(BUILTIN.read);
+  if (s.bash) tools.push(BUILTIN.bash);
+  if (s.edit) tools.push(BUILTIN.edit);
+  if (s.mcp) tools.push(...MCP_TOOLS);
+  if (s.skills.length) tools.push(SKILL_TOOL);
+  const skillPart = s.skills.length ? '# 可用的 Skills（只列名稱與一句說明，全文要用才載入）\n' + s.skills.map(n => `- ${n}: ${SKILLS[n].desc}`).join('\n') : '';
+  const sysText = BASE + (skillPart ? '\n\n' + skillPart : '');
+  const toolsTok = tools.length ? tools.reduce((a, t) => a + tokens(JSON.stringify(t)), 0) + TOOL_OVERHEAD : 0;
+  const descTok = skillPart ? tokens(skillPart) : 0;
+
+  const msgs = [{ m: { role: 'user', content: PRESETS[s.preset].msg }, tok: tokens(PRESETS[s.preset].msg) + 4, kind: 'msg' }];
+  const reqs = [], steps = [];
+  let nTool = 0;
+
+  function makeReq() {
+    const request = {
+      model: MODEL, max_tokens: 8000,
+      system: [{ type: 'text', text: sysText }],
+      ...(tools.length ? { tools } : {}),
+      messages: msgs.map(x => x.m)
+    };
+    const seg = {
+      system: tokens(BASE) + BASE_EXTRA, tools: toolsTok, desc: descTok,
+      msgs: msgs.filter(x => x.kind !== 'skill').reduce((a, x) => a + x.tok, 0),
+      skill: msgs.filter(x => x.kind === 'skill').reduce((a, x) => a + x.tok, 0)
+    };
+    reqs.push({ request, seg, input: seg.system + seg.tools + seg.desc + seg.msgs + seg.skill });
+    return reqs.length - 1;
+  }
+  function addReq() {
+    const ri = makeReq(), n = ri + 1;
+    const parts = [];
+    if (n === 1) {
+      if (s.mcp) parts.push('tools 陣列裡的 MCP 工具已改名為 mcp__tfs__*，和內建工具放在一起，對模型來說沒有差別。');
+      if (s.skills.length) parts.push('system 裡只有 skill 的名稱與一句描述（漸進揭露），SKILL.md 全文還沒進來。');
+      if (!parts.length) parts.push('目前沒有任何工具，模型只能用文字回答。');
+    } else {
+      parts.push('API 無狀態：上一次的 messages 全部重送，後面多了 tool_use 與 tool_result。');
+    }
+    steps.push({ lane: 'agent', title: `組 request #${n}`, desc: n === 1 ? '整包送出：system、tools、訊息' : '整包重送，多了 tool_result', label: `Agent → 模型：POST /v1/messages（request #${n}）`, obj: reqs[ri].request, req: ri, notes: parts, tag: 'request' });
+  }
+  const lastReq = () => reqs.length - 1;
+
+  if (s.mcp) {
+    steps.push({ lane: 'ext', title: 'MCP：tools/list', desc: 'Agent 啟動時問 server 有哪些工具', req: -1, tag: 'mcp', label: '啟動時：Agent ↔ MCP server（JSON-RPC 示意）',
+      obj: { agent_to_server: { jsonrpc: '2.0', id: 1, method: 'tools/list' }, server_to_agent: { jsonrpc: '2.0', id: 1, result: { tools: MCP_DEFS.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })) } } },
+      notes: ['這一步發生在你開始提問之前。MCP 用 inputSchema（駝峰式），Agent 會轉成 API 的 input_schema，並加上 mcp__tfs__ 前綴。'] });
+  }
+  addReq();
+
+  const chain = actionsFor(s.preset, s);
+  let finalText = null, failed = false;
+  for (const a of chain) {
+    if (!a.ok) { finalText = a.fail; failed = true; break; }
+    nTool++;
+    const tid = 'toolu_0' + nTool + 'Xa9';
+    const content = [{ type: 'text', text: a.say }, { type: 'tool_use', id: tid, name: a.name, input: a.input }];
+    const inTok = reqs[lastReq()].input;
+    const outTok = tokens(a.say) + tokens(JSON.stringify(a.input)) + tokens(a.name) + 10;
+    steps.push({ lane: 'model', title: `要求呼叫 ${a.name}`, desc: 'stop_reason: tool_use，只是要求', req: lastReq(), tag: 'resp', label: '模型 → Agent：response',
+      obj: { id: 'msg_0' + nTool + 'Qz', type: 'message', role: 'assistant', model: MODEL, content, stop_reason: 'tool_use', usage: { input_tokens: inTok, output_tokens: outTok } },
+      notes: ['模型只「要求」呼叫，不會自己執行。stop_reason 是 tool_use，代表它在等 Agent 把結果送回來。'] });
+    msgs.push({ m: { role: 'assistant', content }, tok: outTok, kind: 'msg' });
+    steps.push({ lane: a.exec.lane, title: a.exec.title, desc: a.exec.desc, req: lastReq(), tag: 'exec', label: a.exec.label, obj: a.exec.obj, notes: [a.exec.note] });
+    msgs.push({ m: { role: 'user', content: [{ type: 'tool_result', tool_use_id: tid, content: a.result }] }, tok: a.resultTok || tokens(a.result) + 8, kind: a.kind });
+    addReq();
+    if (a.kind === 'skill') steps[steps.length - 1].skillJump = true;
+    finalText = a.final || finalText;
+  }
+  const inTok = reqs[lastReq()].input;
+  steps.push({ lane: 'model', title: '回覆文字（end_turn）', desc: failed ? '沒有可用的工具，只能回覆文字' : '拿到結果，產生最終回答', req: lastReq(), tag: 'resp', label: '模型 → Agent：response',
+    obj: { id: 'msg_0' + (nTool + 1) + 'Qz', type: 'message', role: 'assistant', model: MODEL, content: [{ type: 'text', text: finalText }], stop_reason: 'end_turn', usage: { input_tokens: inTok, output_tokens: tokens(finalText) + 8 } },
+    notes: failed ? ['這個環境缺少需要的工具（或 skill），模型沒有辦法動手，只能說明並要你補上。試著在左邊打開對應的選項。'] : ['stop_reason 是 end_turn：模型說完了，Agent 把文字顯示給你。'], warn: failed });
+  return { steps, reqs, tools };
+}
+
+const LANES = [['model', '遠端模型'], ['agent', '你電腦上的 Agent（Claude Code）'], ['ext', 'MCP server／本機檔案']];
+let cur = 3;
+
+function render() {
+  const s = readState();
+  const r = build(s);
+  cur = Math.max(0, Math.min(cur, r.steps.length - 1));
+  const st = r.steps[cur];
+  $('#progress').textContent = `步驟 ${cur + 1} / ${r.steps.length}`;
+  $$('[data-act="next"]').forEach(b => b.disabled = cur >= r.steps.length - 1);
+  $$('[data-act="prev"]').forEach(b => b.disabled = cur <= 0);
+
+  // lanes
+  let h = LANES.map(l => `<div class="lane-h ${l[0]}">${l[1]}</div>`).join('');
+  r.steps.forEach((x, i) => {
+    if (i > cur) return;
+    h += LANES.map(l => `<div class="cell">${x.lane === l[0]
+      ? `<button type="button" class="card${i === cur ? ' active' : ''}" data-i="${i}" ${i === cur ? 'aria-current="step"' : ''}><span class="n">${i + 1}</span><b>${esc(x.title)}</b><span class="d">${esc(x.desc)}</span></button>` : ''}</div>`).join('');
+  });
+  $('#lanes').innerHTML = h;
+
+  // tokens
+  const rq = st.req >= 0 ? r.reqs[st.req] : null;
+  $('#req-name').textContent = rq ? `request #${st.req + 1}` : '尚未送出 request';
+  if (rq) {
+    bar($('#tbar'), [
+      { label: 'System 基底', value: rq.seg.system, color: 'var(--seg-system)' },
+      { label: '工具定義', value: rq.seg.tools, color: 'var(--seg-tools)' },
+      { label: 'Skill 描述', value: rq.seg.desc, color: 'var(--seg-attach)' },
+      { label: '對話訊息', value: rq.seg.msgs, color: 'var(--seg-history)' },
+      { label: 'Skill 全文', value: rq.seg.skill, color: 'var(--seg-user)' }
+    ].filter(x => x.value > 0));
+  } else {
+    $('#tbar').innerHTML = '<div class="note">這一步還沒有 request，所以沒有輸入 token。</div>';
+  }
+  $('#s-in').textContent = rq ? fmt(rq.input) : '0';
+  $('#s-tools').textContent = rq ? fmt(rq.seg.tools) : '0';
+  $('#s-desc').textContent = rq ? fmt(rq.seg.desc) : '0';
+  $('#s-skill').textContent = rq ? fmt(rq.seg.skill) : '0';
+
+  // notes
+  let notes = (st.notes || []).map(t => `<div class="note ${st.warn ? 'warn' : ''}" style="grid-column:1/-1">${esc(t)}</div>`);
+  if (st.skillJump && st.req > 0) {
+    const d = r.reqs[st.req].input - r.reqs[st.req - 1].input;
+    notes.push(`<div class="note warn" style="grid-column:1/-1">token 跳升：request 輸入從 ${fmt(r.reqs[st.req - 1].input)} 變成 ${fmt(r.reqs[st.req].input)}（+${fmt(d)}）。Skill 全文現在留在歷史裡，之後每一輪都要再付一次。</div>`);
+  } else if (rq && st.tag === 'request' && st.req > 0 && r.reqs[st.req].seg.skill === 0) {
+    const d = rq.input - r.reqs[st.req - 1].input;
+    notes.push(`<div class="note" style="grid-column:1/-1">比上一次 request 多了 ${fmt(d)} token（tool_use 加 tool_result）。</div>`);
+  }
+  $('#notes').innerHTML = notes.join('');
+
+  // json
+  let obj = st.obj;
+  if (s.fold && obj && obj.messages) {
+    obj = { ...obj, system: `（同上，${tokens(obj.system[0].text)} token）`, ...(obj.tools ? { tools: `（同上，共 ${obj.tools.length} 個工具）` } : {}) };
+  }
+  $('#json-label').textContent = `${st.label}`;
+  $('#json').innerHTML = jsonHTML(obj, { clip: 200 });
+
+  // uses
+  const need = [
+    ['MCP 工具（tfs）', s.mcp, '到左邊打開「連上 MCP server」'],
+    ['內建 Read', s.read, '到左邊打開 Read'],
+    ['Skill code-review（再加 Bash 取得 diff）', s.skills.includes('code-review') && s.bash, '到左邊安裝 code-review 並打開 Bash']
+  ][s.preset];
+  $('#uses').innerHTML = `<div class="note ${need[1] ? 'ok' : 'bad'}">這句話需要：<b>${need[0]}</b>　${need[1] ? '<span class="chip ok">具備</span>' : `<span class="chip bad">缺少</span> ${need[2]}，否則模型只能回覆文字。`}</div>`;
+}
+
+$('#lanes').addEventListener('click', e => {
+  const b = e.target.closest('.card');
+  if (b) { cur = +b.dataset.i; render(); }
+});
+$$('[data-act]').forEach(b => b.addEventListener('click', () => {
+  const a = b.dataset.act;
+  if (a === 'next') cur++;
+  else if (a === 'prev') cur--;
+  else cur = 0;
+  render();
+}));
+$$('input[name="preset"], #t-read, #t-bash, #t-edit, #t-mcp, #k-code-review, #k-deploy').forEach(el => el.addEventListener('change', () => { cur = 0; render(); }));
+$('#fold').addEventListener('change', render);
+render();
+</script>
+</body>
+</html>

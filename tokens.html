@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Token 組成實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 1</span><span>面試 1</span></div>
+  <h1>Token 組成實驗</h1>
+  <p class="lede">左邊調整這一輪要送出的內容，右邊即時看到真正送給 API 的 request、模型回傳的 response，以及每一塊各佔多少 token。按「送出這一輪」可以看到對話越長、每一輪越貴。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>你要送出的內容</h2><span class="hint">修改後右邊即時更新</span></header>
+    <div class="body">
+      <div class="field">
+        <label for="system">System prompt（例如 CLAUDE.md 的內容）</label>
+        <textarea id="system" rows="4">你是協助 .NET 開發的助理。
+專案規範：Controller 不得直接使用 DbContext，一律透過 Service。
+回答使用繁體中文。</textarea>
+      </div>
+
+      <div class="field">
+        <span class="label">工具（Tools）</span>
+        <label class="check"><input type="checkbox" id="t-read" checked> <span>Read：讀取檔案</span></label>
+        <label class="check"><input type="checkbox" id="t-bash" checked> <span>Bash：執行指令</span></label>
+        <label class="check"><input type="checkbox" id="t-edit"> <span>Edit：修改檔案</span></label>
+        <label class="check"><input type="checkbox" id="t-mcp"> <span>連上一個 MCP server（多 4 個工具）</span></label>
+        <span class="sub">每個工具的名稱、說明、參數 schema 每一輪都要重送。</span>
+      </div>
+
+      <div class="field">
+        <label for="hist">之前已經來回幾輪（含讀檔的工具結果）：<b id="hist-v">1</b></label>
+        <input type="range" id="hist" min="0" max="12" value="1">
+      </div>
+
+      <label class="check"><input type="checkbox" id="attach"> <span>附上一張螢幕截圖</span></label>
+
+      <div class="field">
+        <label for="msg">這一輪的使用者訊息</label>
+        <textarea id="msg" rows="3">OrderService 刪除出庫單時，庫存結餘沒有回補，幫我找原因。</textarea>
+      </div>
+
+      <div class="field">
+        <label class="check"><input type="checkbox" id="think" checked> <span>開啟延伸思考（Thinking）</span></label>
+        <label for="budget" class="sub">思考預算：<b id="budget-v">4,000</b> tokens</label>
+        <input type="range" id="budget" min="1024" max="16000" step="512" value="4096">
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="send" type="button">送出這一輪</button>
+        <button class="btn" id="reset" type="button">重新開始</button>
+      </div>
+      <p class="disclaimer">token 數是依字數估算（中文約 1.2 token／字，英文約 3.6 字元／token），價格用示意單價：輸入 $3、輸出 $15（每百萬 token）。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header>
+      <h2>實際送出與回傳</h2>
+      <div class="seg-ctl" role="group" aria-label="切換顯示">
+        <button type="button" data-view="req" aria-pressed="true">Request</button>
+        <button type="button" data-view="res" aria-pressed="false">Response</button>
+      </div>
+    </header>
+    <div class="body">
+      <div>
+        <div class="small muted" style="margin-bottom:6px">輸入 token（這一輪整包送出）</div>
+        <div id="in-bar"></div>
+      </div>
+      <div>
+        <div class="small muted" style="margin-bottom:6px">輸出 token（模型這次產生）</div>
+        <div id="out-bar"></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-in">0</div><div class="l">輸入 token</div></div>
+        <div class="stat"><div class="v" id="s-out">0</div><div class="l">輸出 token</div></div>
+        <div class="stat"><div class="v" id="s-cost">$0</div><div class="l">這一輪費用（示意）</div></div>
+        <div class="stat"><div class="v" id="s-total">$0</div><div class="l">累計費用</div></div>
+      </div>
+      <pre class="code" id="json" tabindex="0"></pre>
+      <div id="growth"></div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li>API 是<strong>無狀態</strong>的：每一輪都把 system、工具定義、整段歷史重送一次，所以第 N 輪的輸入包含前面所有內容。</li>
+      <li>工具結果（例如讀進來的整個檔案）會留在歷史裡，<strong>之後每一輪都要再付一次</strong>。</li>
+      <li>思考 token 看不到全文，但<strong>按輸出價計費</strong>；輸出單價通常是輸入的好幾倍。</li>
+      <li>工具和 MCP 越多，固定成本越高：沒用到的工具也在每一輪的輸入裡。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="index.html"><span>← 回首頁</span><b>Agent 實驗室</b></a><a class="pg next" href="effort.html"><span>下一題 →</span><b>Reasoning Effort</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { tokens, cost, fmt, usd, jsonHTML, bar, $, $$ } = Lab;
+
+const TOOLS = {
+  read: { name: 'Read', description: 'Read a file from the local filesystem. Returns the file content with line numbers.', input_schema: { type: 'object', properties: { file_path: { type: 'string', description: 'Absolute path' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['file_path'] } },
+  bash: { name: 'Bash', description: 'Run a shell command and return stdout and stderr. Use for git, build and test commands.', input_schema: { type: 'object', properties: { command: { type: 'string' }, timeout: { type: 'integer' } }, required: ['command'] } },
+  edit: { name: 'Edit', description: 'Replace an exact string in a file. old_string must be unique in the file.', input_schema: { type: 'object', properties: { file_path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' } }, required: ['file_path', 'old_string', 'new_string'] } },
+  mcp: ['wi_list', 'wi_view', 'pr_list', 'pr_view'].map(n => ({ name: 'mcp__tfs__' + n, description: 'TFS: ' + n.replace('_', ' ') + '. Query work items or pull requests from the team server and return JSON.', input_schema: { type: 'object', properties: { id: { type: 'integer' }, project: { type: 'string' }, state: { type: 'string', enum: ['active', 'completed', 'all'] } } } }))
+};
+const TOOL_OVERHEAD = 350;       // fixed instructions the platform adds when tools are present
+const IMAGE_TOKENS = 1600;       // one ~1200x900 screenshot
+
+const FILE_SNIPPET = `public async Task DeleteOutboundAsync(int id)\n{\n    var doc = await _db.Outbounds.Include(x => x.Items).FirstAsync(x => x.Id == id);\n    _db.Outbounds.Remove(doc);\n    await _db.SaveChangesAsync();\n    // TODO: 庫存回補\n}\n`.repeat(14);
+
+function sampleTurn(i) {
+  const files = ['OrderService.cs', 'InventoryService.cs', 'OutboundController.cs', 'StockBalance.cs'];
+  const f = files[i % files.length];
+  return [
+    { role: 'user', content: `第 ${i + 1} 輪：看一下 ${f} 的寫法。` },
+    { role: 'assistant', content: [{ type: 'text', text: `我先讀 ${f}。` }, { type: 'tool_use', id: `toolu_${i}`, name: 'Read', input: { file_path: `D:/code/Shop/Services/${f}` } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_${i}`, content: FILE_SNIPPET }] },
+    { role: 'assistant', content: [{ type: 'text', text: `${f} 在刪除時沒有呼叫庫存回補，建議在 SaveChanges 前呼叫 StockService.Restore()。` }] }
+  ];
+}
+
+const state = { view: 'req', sent: [], total: 0 };
+
+function read() {
+  const tools = [];
+  if ($('#t-read').checked) tools.push(TOOLS.read);
+  if ($('#t-bash').checked) tools.push(TOOLS.bash);
+  if ($('#t-edit').checked) tools.push(TOOLS.edit);
+  if ($('#t-mcp').checked) tools.push(...TOOLS.mcp);
+  return {
+    system: $('#system').value,
+    tools,
+    hist: +$('#hist').value,
+    attach: $('#attach').checked,
+    msg: $('#msg').value,
+    think: $('#think').checked,
+    budget: +$('#budget').value
+  };
+}
+
+function history(n) {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(...sampleTurn(i));
+  for (const t of state.sent) out.push(...t);
+  return out;
+}
+
+function msgTokens(m) {
+  if (typeof m.content === 'string') return tokens(m.content) + 4;
+  return m.content.reduce((a, b) => a + 4 + tokens(b.text || b.content || '') + (b.input ? tokens(JSON.stringify(b.input)) + tokens(b.name) : 0), 0);
+}
+
+function build() {
+  const s = read();
+  const hist = history(s.hist);
+  const userContent = s.attach
+    ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAA…(約 200KB 的圖片資料)' } }, { type: 'text', text: s.msg }]
+    : s.msg;
+  const request = {
+    model: 'claude-sonnet-x',
+    max_tokens: 8000,
+    system: [{ type: 'text', text: s.system }],
+    ...(s.tools.length ? { tools: s.tools } : {}),
+    ...(s.think ? { thinking: { type: 'enabled', budget_tokens: s.budget } } : {}),
+    messages: [...hist, { role: 'user', content: userContent }]
+  };
+
+  const seg = {
+    system: tokens(s.system) + 6,
+    tools: s.tools.length ? s.tools.reduce((a, t) => a + tokens(JSON.stringify(t)), 0) + TOOL_OVERHEAD : 0,
+    history: hist.reduce((a, m) => a + msgTokens(m), 0),
+    attach: s.attach ? IMAGE_TOKENS : 0,
+    user: tokens(s.msg) + 4
+  };
+  const input = Object.values(seg).reduce((a, b) => a + b, 0);
+
+  const thinking = s.think ? Math.min(s.budget, 600 + seg.user * 25 + Math.round(seg.history * 0.05)) : 0;
+  const answer = '找到原因了：DeleteOutboundAsync 直接刪除出庫單，沒有把出庫數量加回庫存結餘。建議在 Service 層的同一個交易裡先呼叫 StockService.Restore(items)，再刪除單據，並補一個整合測試：刪除出庫單後，庫存數量要回到出庫前。';
+  const visible = tokens(answer) + 40;
+  const response = {
+    id: 'msg_01Abc…',
+    type: 'message',
+    role: 'assistant',
+    model: request.model,
+    content: [
+      ...(s.think ? [{ type: 'thinking', thinking: '（模型的推理過程，使用者通常只看到摘要，但全部按輸出 token 計費）' }] : []),
+      { type: 'text', text: answer }
+    ],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: input, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: thinking + visible }
+  };
+  return { s, request, response, seg, input, thinking, visible, answer };
+}
+
+function render() {
+  const r = build();
+  $('#hist-v').textContent = r.s.hist;
+  $('#budget-v').textContent = fmt(r.s.budget);
+  $('#budget').disabled = !r.s.think;
+
+  bar($('#in-bar'), [
+    { label: 'System', value: r.seg.system, color: 'var(--seg-system)' },
+    { label: '工具定義', value: r.seg.tools, color: 'var(--seg-tools)' },
+    { label: '對話歷史', value: r.seg.history, color: 'var(--seg-history)' },
+    { label: '附件', value: r.seg.attach, color: 'var(--seg-attach)' },
+    { label: '本輪訊息', value: r.seg.user, color: 'var(--seg-user)' }
+  ].filter(x => x.value > 0));
+  bar($('#out-bar'), [
+    { label: '思考', value: r.thinking, color: 'var(--seg-thinking)' },
+    { label: '可見回答', value: r.visible, color: 'var(--seg-output)' }
+  ].filter(x => x.value > 0));
+
+  const c = cost({ input: r.input, output: r.thinking + r.visible });
+  $('#s-in').textContent = fmt(r.input);
+  $('#s-out').textContent = fmt(r.thinking + r.visible);
+  $('#s-cost').textContent = usd(c);
+  $('#s-total').textContent = usd(state.total + c);
+  $('#json').innerHTML = jsonHTML(state.view === 'req' ? r.request : r.response);
+  renderGrowth();
+  return r;
+}
+
+function renderGrowth() {
+  if (!state.log || !state.log.length) { $('#growth').innerHTML = ''; return; }
+  const max = Math.max(...state.log.map(x => x.input));
+  $('#growth').innerHTML = `<div class="small muted" style="margin-bottom:6px">每一輪的輸入 token（已送出 ${state.log.length} 輪）</div>
+    <div class="tbl"><table><thead><tr><th>輪</th><th>輸入</th><th style="width:55%"></th><th class="num">費用</th></tr></thead><tbody>${
+      state.log.map((x, i) => `<tr><td>${i + 1}</td><td class="num">${fmt(x.input)}</td><td><div class="tbar" style="height:10px"><i style="width:${x.input / max * 100}%;background:var(--seg-history)"></i></div></td><td class="num">${usd(x.cost)}</td></tr>`).join('')
+    }</tbody></table></div>`;
+}
+
+$('#send').addEventListener('click', () => {
+  const r = build();
+  const c = cost({ input: r.input, output: r.thinking + r.visible });
+  state.total += c;
+  (state.log = state.log || []).push({ input: r.input, cost: c });
+  state.sent.push([{ role: 'user', content: r.s.msg }, { role: 'assistant', content: [{ type: 'text', text: r.answer }] }]);
+  render();
+});
+$('#reset').addEventListener('click', () => { state.sent = []; state.total = 0; state.log = []; render(); });
+$$('[data-view]').forEach(b => b.addEventListener('click', () => {
+  state.view = b.dataset.view;
+  $$('[data-view]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  render();
+}));
+$$('textarea, input').forEach(el => el.addEventListener('input', render));
+render();
+</script>
+</body>
+</html>

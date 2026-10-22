@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>模型路由實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .stage { display: grid; grid-template-columns: minmax(0, 1fr) 6.5em; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .stage:last-of-type { border-bottom: 0; }
+  .stage .nm { font-size: 13.5px; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+  .stage select { padding: 5px 6px; font-size: 13px; }
+  .stage .ix { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); }
+  .cmp tr.cur td { background: var(--accent-soft); }
+  .logbox { max-height: 340px; }
+  .sec-title { font-size: 13px; font-weight: 700; margin: 0 0 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .code.wrapx { white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 8</span><span>面試 10</span></div>
+  <h1>模型路由實驗</h1>
+  <p class="lede">一個長任務拆成十個階段，每個階段難度不同。左邊替每一段挑模型，右邊即時模擬：花多少錢、花多久、哪裡失敗重做、最後有沒有把壞掉的成果往下傳。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>每個階段用哪個模型</h2><span class="hint">改了右邊立刻重跑</span></header>
+    <div class="body">
+      <div class="field">
+        <span class="label">預設分工</span>
+        <div class="row" role="group" aria-label="預設分工">
+          <button class="btn" type="button" data-preset="top" aria-pressed="false">頂規一路到底</button>
+          <button class="btn" type="button" data-preset="small" aria-pressed="false">全部小型</button>
+          <button class="btn" type="button" data-preset="rec" aria-pressed="true">建議分工</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">任務流程（難度：高需要判斷力，低是機械工作）</span>
+        <div id="stages"></div>
+      </div>
+
+      <div class="field">
+        <span class="label">規則</span>
+        <label class="check"><input type="checkbox" id="esc" checked> <span>同一子任務連錯兩次就升級（帶失敗紀錄換頂規）</span></label>
+        <label class="check"><input type="checkbox" id="clean" checked> <span>驗收用乾淨上下文（審查的人沒看過實作過程）</span></label>
+      </div>
+      <p class="disclaimer">成本、時間、成功機率都是示意用的固定規則，不是實測：能力不足一級時約半數機率失敗，差兩級必定失敗。同樣設定每次結果一樣。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>模擬結果</h2><span class="hint" id="presetname"></span></header>
+    <div class="body">
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-cost">$0</div><div class="l">總成本（示意）</div></div>
+        <div class="stat"><div class="v" id="s-time">0</div><div class="l">總時間</div></div>
+        <div class="stat"><div class="v" id="s-fail">0</div><div class="l">失敗重做次數</div></div>
+        <div class="stat"><div class="v" id="s-risk">-</div><div class="l">品質風險</div></div>
+      </div>
+      <div id="verdict"></div>
+
+      <div>
+        <h3 class="sec-title">三種分工對照（用目前的兩個規則勾選）</h3>
+        <div class="tbl"><table class="cmp"><thead><tr><th>分工</th><th class="num">成本</th><th class="num">時間</th><th class="num">失敗</th><th>風險</th></tr></thead><tbody id="cmp"></tbody></table></div>
+      </div>
+
+      <div>
+        <h3 class="sec-title">逐階段結果</h3>
+        <div class="tbl"><table><thead><tr><th>階段</th><th>模型</th><th class="num">次數</th><th class="num">成本</th><th class="num">時間</th><th>結果</th></tr></thead><tbody id="rows"></tbody></table></div>
+      </div>
+
+      <div>
+        <h3 class="sec-title">執行紀錄</h3>
+        <pre class="code logbox" id="log" tabindex="0" aria-label="執行紀錄"></pre>
+      </div>
+
+      <div>
+        <h3 class="sec-title">workflow 能不能自動切換模型？<span class="chip accent">示意</span></h3>
+        <p class="small muted" style="margin:0 0 8px">能。只要每個 subagent 或每個步驟都明確指定 <code>model</code>，就不用人手動切。下面的步驟清單會跟著左邊的選擇更新。</p>
+        <div class="small muted" style="margin-bottom:4px">subagent 定義（一個檔案一個角色）</div>
+        <pre class="code" tabindex="0" id="agentdef"></pre>
+        <div class="row" style="margin:10px 0 4px;justify-content:space-between">
+          <span class="small muted">workflow 步驟清單（依左邊設定產生）</span>
+          <button class="btn" type="button" id="copy">複製</button>
+        </div>
+        <pre class="code" tabindex="0" id="wf"></pre>
+        <div class="note warn" style="margin-top:10px">「什麼時候該升級」是判斷，不是設定值。要寫成明確規則（連錯幾次、驗收哪一條沒過、碰到資料刪除或權限就直接用頂規），workflow 才有東西可以照著跑；沒寫規則，它只會一直重試同一個模型。</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li><strong>依判斷力需求選模型</strong>，不是依任務大小：規劃、除錯、審查要判斷，搜尋讀檔和照規格實作可以降級。</li>
+      <li><strong>升級要帶失敗紀錄</strong>：連錯兩次就停，把試過什麼、錯在哪交給頂規，不要讓它從零再試一遍。</li>
+      <li><strong>計畫寫得具體就能降級</strong>：頂規先把規格、檔案、驗收條件寫清楚，中階才照著做得穩。</li>
+      <li><strong>交接靠檔案</strong>：階段之間用規格檔、結果檔傳遞，不靠對話記憶，換模型才接得上。</li>
+      <li><strong>驗收獨立</strong>：審查的人不能是做事的人，也不能繼承做事的上下文，否則只是自己驗自己。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="subagent.html"><span>← 上一題</span><b>Subagent</b></a><a class="pg next" href="workitems.html"><span>下一題 →</span><b>需求拆解</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { cost, usd, esc, $, $$ } = Lab;
+
+const CAP = { '頂規': 3, '中階': 2, '小型': 1 };
+const COST_MULT = { '頂規': 5, '中階': 1, '小型': 0.2 };
+const TIME_MULT = { '頂規': 2, '中階': 1, '小型': 0.5 };
+const DIFF = { 1: ['低', 'ok'], 2: ['中', 'warn'], 3: ['高', 'bad'] };
+const TIERS = ['頂規', '中階', '小型'];
+
+// base work per attempt on a mid-tier model: input tokens, output tokens, seconds
+const KINDS = {
+  plan:   { name: '需求釐清與規劃', diff: 3, inp: 20000, out: 4000, sec: 60,  rec: '頂規' },
+  search: { name: '搜尋與讀檔',     diff: 1, inp: 30000, out: 1000, sec: 25,  rec: '小型' },
+  impl:   { name: '照規格實作',     diff: 2, inp: 40000, out: 6000, sec: 90,  rec: '中階' },
+  debug:  { name: '疑難除錯',       diff: 3, inp: 60000, out: 8000, sec: 150, rec: '頂規' },
+  review: { name: '審查與驗收',     diff: 3, inp: 50000, out: 3000, sec: 70,  rec: '頂規' }
+};
+const FLOW = [['plan', 1], ['search', 3], ['impl', 4], ['debug', 1], ['review', 1]];
+const STAGES = [];
+FLOW.forEach(([k, n]) => { for (let i = 1; i <= n; i++) STAGES.push({ key: k, label: KINDS[k].name + (n > 1 ? ` ${i}/${n}` : ''), ...KINDS[k] }); });
+const REVIEW = STAGES.length - 1;
+
+const PRESETS = {
+  top:   { name: '頂規一路到底', models: STAGES.map(() => '頂規') },
+  small: { name: '全部小型',     models: STAGES.map(() => '小型') },
+  rec:   { name: '建議分工',     models: STAGES.map(s => s.rec) }
+};
+
+const state = { models: PRESETS.rec.models.slice(), preset: 'rec' };
+
+// deterministic "dice": same input always gives the same result
+const dice = (si, k) => (si * 37 + k * 53 + 11) % 100;
+function passes(si, k, model, diff) {
+  const gap = diff - CAP[model];
+  if (gap <= 0) return true;
+  if (gap >= 2) return false;
+  return dice(si, k) < 45;
+}
+function attemptCost(st, model, withLog) {
+  return cost({ input: st.inp * (withLog ? 1.15 : 1), output: st.out }) * COST_MULT[model];
+}
+
+function simulate(models, escRule, clean) {
+  const log = [], rows = [];
+  let totalCost = 0, totalSec = 0, fails = 0;
+  STAGES.forEach((st, si) => {
+    let cur = models[si], f = 0, k = 0, c = 0, sec = 0, status = '', escalated = false;
+    const tag = `[${String(si + 1).padStart(2, '0')}] ${st.label}`;
+    log.push(`<span class="dim">${esc(tag)}｜難度${DIFF[st.diff][0]}｜用${cur}</span>`);
+    for (;;) {
+      k++;
+      c += attemptCost(st, cur, escalated);
+      sec += st.sec * TIME_MULT[cur];
+      if (passes(si, k, cur, st.diff)) {
+        log.push(`    第 ${k} 次（${cur}）通過`);
+        status = escalated ? 'esc' : (k > 1 ? 'retry' : 'ok');
+        break;
+      }
+      f++; fails++;
+      log.push(`    第 ${k} 次（${cur}）<span class="b">失敗</span>：能力不足以處理難度${DIFF[st.diff][0]}的工作`);
+      if (escRule && cur !== '頂規' && f >= 2) {
+        log.push(`    <span class="hl">連錯 2 次 → 帶著完整失敗紀錄升級到頂規</span>`);
+        cur = '頂規'; f = 0; escalated = true;
+        continue;
+      }
+      if (!escRule && f >= 3) {
+        log.push(`    <span class="b">重試 3 次仍失敗，沒有升級規則：把壞掉的成果交給下一階段</span>`);
+        status = 'broken';
+        break;
+      }
+    }
+    rows.push({ st, start: models[si], end: cur, k, c, sec, status });
+    totalCost += c; totalSec += sec;
+  });
+
+  // review: a stage that succeeded, with a clean context, catches broken upstream work
+  const broken = rows.filter(r => r.status === 'broken' && r.st.key !== 'review');
+  let remaining = rows.filter(r => r.status === 'broken').length;
+  if (broken.length) {
+    const rv = rows[REVIEW];
+    if (rv.status !== 'broken' && clean) {
+      log.push(`<span class="hl">[審查] 乾淨上下文抓到 ${broken.length} 個階段的成果有問題，退回用頂規重做</span>`);
+      broken.forEach(r => {
+        const si = STAGES.indexOf(r.st);
+        const c = attemptCost(r.st, '頂規', true), s = r.st.sec * TIME_MULT['頂規'];
+        r.c += c; r.sec += s; r.k += 1; r.status = 'fixed'; r.end = '頂規';
+        totalCost += c; totalSec += s; fails++;
+        log.push(`    [${String(si + 1).padStart(2, '0')}] ${esc(r.st.label)} 頂規重做 通過`);
+      });
+      remaining = rows.filter(r => r.status === 'broken').length;
+    } else if (rv.status !== 'broken') {
+      log.push(`<span class="b">[審查] 審查沿用做事的上下文，被前面的結論帶著走：沒抓出 ${broken.length} 個有問題的階段</span>`);
+    } else {
+      log.push(`<span class="b">[審查] 審查本身也失敗，沒有人把關，${broken.length} 個階段的壞成果直接出貨</span>`);
+    }
+  }
+  const risk = remaining === 0 ? ['低', 'ok'] : remaining <= 2 ? ['中', 'warn'] : ['高', 'bad'];
+  log.push(remaining === 0
+    ? `<span class="dim">全部階段通過，沒有壞成果往下傳</span>`
+    : `<span class="b">結束時仍有 ${remaining} 個階段帶著壞成果，品質風險：${risk[0]}</span>`);
+  return { rows, log, cost: totalCost, sec: totalSec, fails, remaining, risk };
+}
+
+const fmtTime = s => { s = Math.round(s); const m = Math.floor(s / 60); return m ? `${m} 分 ${s % 60} 秒` : `${s} 秒`; };
+const STATUS = {
+  ok: ['通過', 'ok'], retry: ['重試後通過', 'warn'], esc: ['升級後通過', 'accent'],
+  broken: ['帶病往下走', 'bad'], fixed: ['審查退回重做', 'warn']
+};
+
+function renderStages() {
+  $('#stages').innerHTML = STAGES.map((st, i) => `<div class="stage">
+    <div class="nm"><span class="ix">${String(i + 1).padStart(2, '0')}</span><span>${esc(st.label)}</span><span class="chip ${DIFF[st.diff][1]}">難度${DIFF[st.diff][0]}</span></div>
+    <select data-i="${i}" aria-label="${esc(st.label)} 使用的模型">${TIERS.map(t => `<option${t === state.models[i] ? ' selected' : ''}>${t}</option>`).join('')}</select>
+  </div>`).join('');
+  $$('#stages select').forEach(s => s.addEventListener('change', () => { state.models[+s.dataset.i] = s.value; state.preset = detectPreset(); render(); }));
+}
+function detectPreset() {
+  for (const k in PRESETS) if (PRESETS[k].models.every((m, i) => m === state.models[i])) return k;
+  return null;
+}
+
+function workflowYaml(r, escRule) {
+  const names = STAGES.map((st, i) => {
+    const slug = { plan: 'plan', search: 'search', impl: 'implement', debug: 'debug', review: 'review' }[st.key];
+    const sameKind = STAGES.filter(x => x.key === st.key);
+    return slug + (sameKind.length > 1 ? '-' + (sameKind.indexOf(st) + 1) : '');
+  });
+  const lines = ['# workflow.yaml（示意，欄位名稱依你用的工具而定）', 'steps:'];
+  STAGES.forEach((st, i) => {
+    const gate = st.key === 'review' ? ', context: clean' : '';
+    lines.push(`  - { step: ${names[i]}, model: ${state.models[i]}${gate} }`);
+  });
+  if (escRule) lines.push('escalate_when:', '  same_step_failures: 2', '  action: rerun', '  model: 頂規', '  attach: failure_log.md   # 試過什麼、錯在哪');
+  else lines.push('# 沒有 escalate_when：連錯只會重試同一個模型');
+  return lines.join('\n');
+}
+const AGENT_DEF = `# .claude/agents/searcher.md（示意）
+---
+name: searcher
+description: 搜尋與讀檔，只回傳結論與 檔案:行號
+model: 小型        # 這個角色固定用小型模型
+tools: Read, Grep, Glob
+---
+你負責定位程式碼。命中後只讀前後 30 行，
+不要回貼整檔，結果寫到指定的輸出檔。`;
+
+function render() {
+  const escRule = $('#esc').checked, clean = $('#clean').checked;
+  const r = simulate(state.models, escRule, clean);
+  $$('[data-preset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === state.preset)));
+  $('#presetname').textContent = state.preset ? PRESETS[state.preset].name : '自訂分工';
+  $('#s-cost').textContent = usd(r.cost);
+  $('#s-time').textContent = fmtTime(r.sec);
+  $('#s-fail').textContent = r.fails;
+  $('#s-risk').innerHTML = `<span class="chip ${r.risk[1]}" style="font-size:15px">${r.risk[0]}</span>`;
+
+  const allTop = state.models.every(m => m === '頂規');
+  let v;
+  if (r.remaining > 0) v = ['bad', `有 ${r.remaining} 個階段帶著壞成果往下走。${escRule ? '' : '沒有升級規則，連錯只會原地重試。'}${clean ? '' : '審查沒有獨立，也抓不到。'}`];
+  else if (allTop) v = ['warn', '最穩，但每一段都付頂規的價錢：搜尋讀檔這種機械工作根本用不到。'];
+  else if (r.fails > 0) v = ['warn', `品質守住了，但中途失敗 ${r.fails} 次，多花的錢和時間就是「模型挑太小」的代價。`];
+  else v = ['ok', '難的段落給頂規、機械的段落降級，沒有失敗重做，成本只有頂規一路到底的一小部分。'];
+  $('#verdict').innerHTML = `<div class="note ${v[0]}">${v[1]}</div>`;
+
+  $('#cmp').innerHTML = Object.keys(PRESETS).map(k => {
+    const x = simulate(PRESETS[k].models, escRule, clean);
+    return `<tr class="${state.preset === k ? 'cur' : ''}"><td>${PRESETS[k].name}</td><td class="num">${usd(x.cost)}</td><td class="num">${fmtTime(x.sec)}</td><td class="num">${x.fails}</td><td><span class="chip ${x.risk[1]}">${x.risk[0]}</span></td></tr>`;
+  }).join('');
+
+  $('#rows').innerHTML = r.rows.map((x, i) => {
+    const s = STATUS[x.status];
+    const model = x.start === x.end ? x.start : `${x.start}→${x.end}`;
+    return `<tr><td>${String(i + 1).padStart(2, '0')} ${esc(x.st.label)}</td><td>${model}</td><td class="num">${x.k}</td><td class="num">${usd(x.c)}</td><td class="num">${fmtTime(x.sec)}</td><td><span class="chip ${s[1]}">${s[0]}</span></td></tr>`;
+  }).join('');
+
+  $('#log').innerHTML = r.log.join('\n');
+  $('#agentdef').textContent = AGENT_DEF;
+  $('#wf').textContent = workflowYaml(r, escRule);
+}
+
+$$('[data-preset]').forEach(b => b.addEventListener('click', () => {
+  state.preset = b.dataset.preset;
+  state.models = PRESETS[state.preset].models.slice();
+  renderStages(); render();
+}));
+$('#esc').addEventListener('change', render);
+$('#clean').addEventListener('change', render);
+
+$('#copy').addEventListener('click', () => {
+  const el = $('#wf');
+  const fallback = () => { const rg = document.createRange(); rg.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); };
+  try {
+    navigator.clipboard.writeText(el.textContent).then(() => { $('#copy').textContent = '已複製'; setTimeout(() => $('#copy').textContent = '複製', 1500); }).catch(fallback);
+  } catch (e) { fallback(); }
+});
+
+renderStages();
+render();
+</script>
+</body>
+</html>

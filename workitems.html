@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>需求拆解實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .q { display: grid; gap: 2px; }
+  .q .sub { font-size: 12px; color: var(--muted); margin-left: 26px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 12px; display: grid; gap: 10px; min-width: 0; }
+  .card.h { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+  .card h3 { margin: 0; font-size: 15px; line-height: 1.4; }
+  .card .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .card dl { margin: 0; display: grid; grid-template-columns: 5.2em minmax(0, 1fr); gap: 6px 10px; font-size: 13.5px; }
+  .card dt { color: var(--muted); font-size: 12.5px; padding-top: 1px; }
+  .card dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .card dd ul { margin: 0; padding-left: 1.1em; }
+  .card .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .stepbtn { font: inherit; text-align: left; background: none; border: 0; padding: 2px 0; cursor: pointer; color: var(--ink); display: grid; gap: 0; min-width: 0; }
+  .stepbtn .t { font-weight: 500; font-size: 14px; }
+  .stepbtn .d { font-size: 12.5px; color: var(--muted); }
+  .stepbtn[aria-pressed="true"] .t { text-decoration: line-through; color: var(--muted); }
+  .sec-title { font-size: 13px; font-weight: 700; margin: 0 0 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .code.wrapx { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; }
+  .dep { font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 9</span><span>面試 11</span></div>
+  <h1>需求拆解實驗</h1>
+  <p class="lede">左邊放一個模糊的業務需求、回答釐清問題、選切法；右邊產生可以直接交給 agent 的工作項目（交辦包）。比較「水平分層」和「垂直切片」差在哪，並看每一張卡展開後的完整 prompt。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>需求與釐清</h2><span class="hint">改了右邊立刻更新</span></header>
+    <div class="body">
+      <div class="field">
+        <label for="req">業務需求（可以改成自己的）</label>
+        <textarea id="req" rows="4">出庫單刪除時要回補庫存，並記錄庫存異動歷程，主管可以查詢</textarea>
+        <span class="sub">改成別的需求時，右邊會換成通用範本，並把你的文字填進去。</span>
+      </div>
+
+      <div class="field">
+        <span class="label">動工前的釐清問題（勾起來代表已經問清楚）</span>
+        <div class="q"><label class="check"><input type="checkbox" data-q="who" checked> <span>誰會用？</span></label><span class="sub">例：倉管刪單，主管查歷程</span></div>
+        <div class="q"><label class="check"><input type="checkbox" data-q="success" checked> <span>成功長什麼樣？</span></label><span class="sub">例：刪單後庫存回到出庫前，歷程多一筆</span></div>
+        <div class="q"><label class="check"><input type="checkbox" data-q="nogo" checked> <span>不做什麼？</span></label><span class="sub">例：不處理歷史資料，不做匯出</span></div>
+        <div class="q"><label class="check"><input type="checkbox" data-q="vol"> <span>資料量多大？</span></label><span class="sub">例：每月約 3 萬筆異動</span></div>
+        <div class="q"><label class="check"><input type="checkbox" data-q="perm"> <span>權限怎麼管？</span></label><span class="sub">例：只有主管角色能查</span></div>
+      </div>
+
+      <div class="field">
+        <span class="label">切法</span>
+        <div class="seg-ctl" role="group" aria-label="切法">
+          <button type="button" data-slice="v" aria-pressed="true">垂直切片</button>
+          <button type="button" data-slice="h" aria-pressed="false">水平分層</button>
+        </div>
+        <span class="sub">垂直：每一片都從資料到畫面走通一小段。水平：先做完所有資料表，再做完所有 API，最後做畫面。</span>
+      </div>
+
+      <label class="check"><input type="checkbox" id="fresh"> <span>全新專案（沒有任何既有工具）</span></label>
+      <p class="disclaimer">卡片內容是針對範例需求預先寫好的示意，檔名與數字都是虛構的；不是由你輸入的文字自動分析出來的。</p>
+    </div>
+  </section>
+
+  <section class="pane out">
+    <header><h2>產生的工作項目</h2><span class="hint" id="mode"></span></header>
+    <div class="body" id="out" aria-live="polite"></div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li><strong>先釐清、先寫驗收條件</strong>：問題沒問清楚就動工，agent 會自己補假設，而且補得很有自信。</li>
+      <li><strong>垂直切片可以獨立驗證</strong>：每一片做完都能跑、能測、能退回；水平分層要到最後才第一次看到結果。</li>
+      <li><strong>交辦包要自給自足、寫範圍外</strong>：接手的人沒看過前文，目標、背景、檔案、限制、驗收都要在同一份裡。</li>
+      <li><strong>大小以一個 session 做得完為準</strong>：一張卡塞太多，agent 做到一半上下文就亂了；寧可多切一張。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="routing.html"><span>← 上一題</span><b>模型路由</b></a><a class="pg next" href="review.html"><span>下一題 →</span><b>Code Review Skill</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { esc, $, $$ } = Lab;
+
+const SAMPLE = '出庫單刪除時要回補庫存，並記錄庫存異動歷程，主管可以查詢';
+
+const QS = {
+  who:     ['誰會用？', '不知道使用者是誰，驗收條件就寫不出來（刪單的是倉管還是主管？）。'],
+  success: ['成功長什麼樣？', '沒有可觀察的完成標準，agent 只能憑感覺說「做好了」。'],
+  nogo:    ['不做什麼？', '範圍外沒寫，agent 會順手多做，例如順便重構整個庫存模組。'],
+  vol:     ['資料量多大？', '不知道資料量，歷程表要不要索引、要不要分頁都沒有依據。'],
+  perm:    ['權限怎麼管？', '不知道誰能查，歷程可能被所有人看到，或被擋掉不該擋的人。']
+};
+
+const STEPS = [
+  ['釐清需求', '跟需求方問清楚誰用、做什麼、不做什麼。'],
+  ['寫規格', '一頁規格，含驗收條件，存成檔案而不是留在對話裡。'],
+  ['建 repo 與 CLAUDE.md', '專案規範、常用指令、禁止事項，之後每個 session 都會讀。'],
+  ['先建骨架、測試框架、lint、CI', '第一張卡開工前，build 和 test 就要能跑。'],
+  ['切垂直切片', '每一片都能獨立驗收，順序依相依性排好（下面的卡片）。'],
+  ['逐片實作驗收', '一片一個 session，驗收通過才開下一片。'],
+  ['長出 skill／腳本', '同樣的流程做到第三次，就寫成 skill 或腳本。'],
+  ['回顧寫回規範', '踩到的坑與新慣例寫回 CLAUDE.md，下一個專案直接受益。']
+];
+
+// ---- pre-authored work items for the sample requirement -------------------
+const VERT = [
+  { id: 'v1', title: '① 刪除出庫單時回補庫存', size: ['ok', '一個 session 做得完'], verify: ['ok', '可獨立驗證：整合測試'], est: '約 3 個檔案', deps: [], needs: [],
+    goal: '刪除出庫單時，在同一個交易內把每個品項的出庫數量加回庫存結餘。',
+    bg: '目前 DeleteOutboundAsync 只刪單據，StockBalance 不會變，帳面庫存因此少算。這是整個需求的第一刀，做完系統就比現在正確。',
+    files: ['Services/OutboundService.cs（DeleteOutboundAsync）', 'Services/InventoryService.cs（參考 Restore 的寫法）', 'Tests/OutboundServiceTests.cs'],
+    limits: ['Controller 不得直接使用 DbContext，一律透過 Service', '刪單與回補必須在同一個交易，不能只做一半', '不改資料表結構'],
+    accept: ['dotnet build 通過，dotnet test 全綠（貼結果末 10 行）', '新增測試：出庫 5 件 → 刪單 → 該品項庫存 +5', '新增測試：回補失敗時單據沒有被刪（交易回滾）'],
+    out: ['異動歷程', '查詢 API 與畫面', '權限', '重構既有庫存模組'],
+    fmt: '結論 ≤5 行；修改檔案清單；測試結果末 10 行' },
+  { id: 'v2', title: '② 回補時寫入庫存異動歷程', size: ['ok', '一個 session 做得完'], verify: ['ok', '可獨立驗證：查資料表'], est: '約 4 個檔案', deps: ['①'], needs: ['vol'],
+    goal: '每次回補都在同一個交易內寫一筆異動紀錄：品項、數量、原因（刪除出庫單）、單號、操作者、時間。',
+    bg: '① 已經會回補庫存，但事後查不到為什麼變動。歷程是之後主管查詢的資料來源。',
+    files: ['Entities/StockMovement.cs（新）', 'Migrations/（新增 StockMovement 資料表）', 'Services/InventoryService.cs', 'Tests/InventoryServiceTests.cs'],
+    limits: ['歷程只增不改不刪（append-only）', 'migration 要能 up 也能 down', '依「品項＋時間」建索引', '寫歷程與回補在同一個交易'],
+    accept: ['刪單後，資料表裡多出與品項數相同的筆數，欄位齊全', '回補失敗時不會留下歷程（一起回滾）', 'migration up／down 都能執行', 'dotnet test 全綠，含 ① 的測試'],
+    out: ['查詢 API 與畫面', '補寫歷史資料', '入庫、盤點等其他單據的異動'],
+    fmt: '結論 ≤5 行；migration 檔名；測試結果末 10 行' },
+  { id: 'v3', title: '③ 主管查詢異動歷程（API 加最小頁面）', size: ['warn', '偏大：接近一個 session 上限'], verify: ['ok', '可獨立驗證：API 測試加手動操作'], est: '約 6 個檔案', deps: ['②'], needs: ['perm', 'vol', 'who'],
+    goal: '主管可依品項與日期區間查詢異動歷程（分頁），並有一個最小可用的查詢頁面。',
+    bg: '② 已經在寫歷程，這一片把它露出來給主管用。若做到一半覺得太大，就拆成 API 與頁面兩張。',
+    files: ['Controllers/StockMovementController.cs（新）', 'Services/StockMovementQueryService.cs（新）', 'Pages/StockMovements/Index（新）', 'Tests/StockMovementQueryTests.cs'],
+    limits: ['只有「主管」角色能呼叫，其他角色回 403', '一律分頁，每頁最多 50 筆', 'Controller 不得直接使用 DbContext'],
+    accept: ['主管查得到 ② 寫入的紀錄，可依品項、日期區間篩選', '倉管帳號呼叫回 403', '翻頁不重複、不漏', 'dotnet test 全綠'],
+    out: ['匯出 Excel', '圖表', '修改或刪除歷程'],
+    fmt: '結論 ≤5 行；API 路徑與範例回應；測試結果末 10 行' },
+  { id: 'v4', title: '④ 邊界情況與整體回歸', size: ['ok', '一個 session 做得完'], verify: ['ok', '可獨立驗證：邊界測試'], est: '約 2 個檔案', deps: ['③'], needs: [],
+    goal: '處理重複刪除、已出貨單據不可刪、兩個請求同時刪同一張單這三種情況。',
+    bg: '主流程已通，剩下是上線前最容易出事的邊界。放最後，因為它依賴前三片的交易寫法。',
+    files: ['Services/OutboundService.cs', 'Tests/OutboundServiceTests.cs'],
+    limits: ['沿用前三片的交易寫法，不另起一套', '不改 API 對外的欄位'],
+    accept: ['重複刪除同一張單：第二次回明確錯誤，庫存只回補一次', '已出貨單據不可刪（回 409），庫存不變', '兩個請求同時刪同一張單，庫存只加一次', '全部既有測試仍然全綠'],
+    out: ['效能調校', '重構'],
+    fmt: '結論 ≤5 行；三種情況各自的測試名稱與結果' }
+];
+
+const HORIZ = [
+  { id: 'h1', title: '① 建立所有資料表與欄位', size: ['warn', '偏大：要一次想完所有欄位'], verify: ['bad', '做完只能確認 migration 跑得過'], est: '約 5 個檔案', deps: [], needs: ['vol'],
+    goal: '一次把庫存異動歷程、索引、角色權限相關的資料表與欄位全部建好。',
+    bg: '先把底層做完，後面的 API 與畫面才有東西可用。欄位是憑想像設計的，還沒有任何呼叫端驗證過。',
+    files: ['Entities/*.cs', 'Migrations/'],
+    limits: ['依設計文件建表', 'migration 要能 up 也能 down'],
+    accept: ['migration 執行成功', '資料表結構與設計文件一致'],
+    out: ['任何 API', '任何畫面'],
+    fmt: '結論 ≤5 行；migration 檔名' },
+  { id: 'h2', title: '② 寫完所有 API（回補、寫歷程、查詢、權限）', size: ['bad', '太大：超過一個 session'], verify: ['bad', '只能用 mock 測，沒有真實資料流'], est: '約 12 個檔案', deps: ['①'], needs: ['perm', 'vol', 'who'],
+    goal: '實作刪單回補、寫歷程、主管查詢與權限檢查全部的後端邏輯。',
+    bg: '資料表已經有了，這一張把所有後端一次做完。三件事互相牽連，agent 很容易做到一半漏掉交易或權限。',
+    files: ['Services/OutboundService.cs', 'Services/InventoryService.cs', 'Controllers/StockMovementController.cs', 'Tests/*'],
+    limits: ['Controller 不得直接使用 DbContext', '查詢要分頁', '只有主管能查'],
+    accept: ['所有 API 單元測試通過', '權限檢查有測試'],
+    out: ['畫面'],
+    fmt: '結論 ≤5 行；API 清單' },
+  { id: 'h3', title: '③ 做完所有畫面', size: ['warn', '偏大：畫面加整合一次到位'], verify: ['bad', '到這裡才第一次看到整條流程'], est: '約 6 個檔案', deps: ['②'], needs: [],
+    goal: '做出刪單確認與主管查詢頁面，把前面的 API 接起來。',
+    bg: '這是第一次有人實際操作整條流程。若前兩層的欄位或 API 設計有誤，要在這裡才發現，①②都得返工。',
+    files: ['Pages/Outbound/', 'Pages/StockMovements/'],
+    limits: ['沿用既有的 UI 元件'],
+    accept: ['頁面能操作', '主管能查到歷程'],
+    out: ['匯出', '圖表'],
+    fmt: '結論 ≤5 行；畫面截圖路徑' }
+];
+
+// ---- generic templates when the requirement text is changed ----------------
+function genericItems(horizontal) {
+  const ph = (t) => '<' + t + '>';
+  if (!horizontal) {
+    return [
+      { id: 'g1', title: '① 最小可驗證的一條完整路徑', size: ['ok', '一個 session 做得完'], verify: ['ok', '可獨立驗證'], est: '約 3 個檔案', deps: [], needs: [],
+        goal: '先做出最簡單的一條端到端路徑（資料、邏輯、對外介面都走通一次），並附測試。',
+        bg: '整體需求見上方原文。第一片只求「走得通」，不求完整。' + ph('補充：現況哪裡不對、為什麼要做'),
+        files: [ph('檔案路徑 1（現況說明）'), ph('類似既有實作的檔案路徑（照它的模式寫）'), ph('測試檔路徑')],
+        limits: [ph('專案規範與禁止事項'), ph('不能動的範圍')],
+        accept: [ph('可觀察行為 1'), ph('測試指令') + ' 全綠（貼結果末 10 行）'],
+        out: [ph('這一片不做的事 1'), ph('這一片不做的事 2')],
+        fmt: '結論 ≤5 行；修改檔案清單；測試結果末 10 行' },
+      { id: 'g2', title: '② 補齊主要情境', size: ['ok', '一個 session 做得完'], verify: ['ok', '可獨立驗證'], est: '約 3 個檔案', deps: ['①'], needs: [],
+        goal: '在第一片的路徑上補齊其他主要情境與欄位。',
+        bg: '第一片已經驗收通過，這一片在它的基礎上擴充，不要重寫。',
+        files: [ph('第一片修改過的檔案'), ph('新增的檔案路徑')],
+        limits: ['沿用第一片的寫法', ph('專案規範與禁止事項')],
+        accept: [ph('可觀察行為 2'), ph('可觀察行為 3'), '第一片的測試仍然全綠'],
+        out: [ph('這一片不做的事')],
+        fmt: '結論 ≤5 行；修改檔案清單；測試結果末 10 行' },
+      { id: 'g3', title: '③ 邊界情況與整體回歸', size: ['ok', '一個 session 做得完'], verify: ['ok', '可獨立驗證'], est: '約 2 個檔案', deps: ['②'], needs: [],
+        goal: '處理錯誤輸入、重複操作、權限不足等邊界，並跑完整回歸。',
+        bg: '主流程已通，剩下是上線前最容易出事的情況。',
+        files: [ph('相關檔案路徑'), ph('測試檔路徑')],
+        limits: ['不改對外介面', ph('專案規範與禁止事項')],
+        accept: [ph('邊界情況 1 的預期行為'), ph('邊界情況 2 的預期行為'), '全部既有測試仍然全綠'],
+        out: ['效能調校', '重構'],
+        fmt: '結論 ≤5 行；各邊界情況的測試名稱與結果' }
+    ];
+  }
+  return [
+    { id: 'gh1', title: '① 先做完所有資料層', size: ['warn', '偏大'], verify: ['bad', '做完只能確認編譯通過'], est: '約 5 個檔案', deps: [], needs: [],
+      goal: '建立這個需求會用到的所有資料表、實體與欄位。', bg: '欄位是憑想像設計的，還沒有任何呼叫端驗證過。',
+      files: [ph('實體與 migration 路徑')], limits: [ph('專案規範與禁止事項')], accept: ['migration 執行成功', ph('結構符合設計文件')], out: ['API', '畫面'], fmt: '結論 ≤5 行' },
+    { id: 'gh2', title: '② 再做完所有 API', size: ['bad', '太大：超過一個 session'], verify: ['bad', '只能用 mock 測'], est: '約 10 個檔案', deps: ['①'], needs: [],
+      goal: '實作所有後端邏輯與對外介面。', bg: '多件事一次做完，互相牽連，容易漏掉交易或權限。',
+      files: [ph('Service 與 Controller 路徑')], limits: [ph('專案規範與禁止事項')], accept: ['單元測試通過', ph('可觀察行為')], out: ['畫面'], fmt: '結論 ≤5 行' },
+    { id: 'gh3', title: '③ 最後才做畫面', size: ['warn', '偏大'], verify: ['bad', '到這裡才第一次看到整條流程'], est: '約 6 個檔案', deps: ['②'], needs: [],
+      goal: '做出所有畫面並接上 API。', bg: '前兩層若有設計錯誤，到這裡才會發現。',
+      files: [ph('畫面檔案路徑')], limits: ['沿用既有 UI 元件'], accept: ['頁面能操作', ph('可觀察行為')], out: [ph('不做的事')], fmt: '結論 ≤5 行；畫面截圖路徑' }
+  ];
+}
+
+// ---- state ------------------------------------------------------------------
+const state = { slice: 'v', open: {}, doneSteps: [0, 1] };
+
+function readInputs() {
+  const answered = {};
+  $$('[data-q]').forEach(c => answered[c.dataset.q] = c.checked);
+  return { req: $('#req').value.trim(), answered, fresh: $('#fresh').checked, custom: $('#req').value.trim() !== SAMPLE };
+}
+
+const rich = t => esc(t).replace(/&lt;([^&]+?)&gt;/g, (m, a) => `<code>&lt;${a}&gt;</code>`);
+const list = a => `<ul>${a.map(x => `<li>${rich(x)}</li>`).join('')}</ul>`;
+
+function promptText(it, idx, total, inp) {
+  const unclear = it.needs.filter(k => !inp.answered[k]);
+  const req = inp.req || '<需求原文>';
+  const L = [];
+  L.push(`目標與動機：${it.goal}`);
+  L.push(`背景：${it.bg}`);
+  L.push(`整體需求（原文）：「${req}」`);
+  L.push(`這是第 ${idx + 1} / ${total} 片。` + (it.deps.length ? `前置：${it.deps.join('、')} 已完成並通過驗收。` : '沒有前置項目。'));
+  L.push('', '相關檔案：', ...it.files.map(f => '- ' + f));
+  L.push('', '限制：', ...it.limits.map(f => '- ' + f));
+  if (unclear.length) L.push(...unclear.map(k => `- ⚠ 待釐清：${QS[k][0]}（動工前先問，不要自己假設）`));
+  L.push('', '驗收條件：', ...it.accept.map(f => '- ' + f));
+  L.push('', '範圍外（不要做）：', ...it.out.map(f => '- ' + f));
+  L.push('', '回報格式：', '- ' + it.fmt, '- 驗收條件逐條回報是否達成，附證據；沒驗證的標「未驗證」', '- 殘留風險／未做的事（沒有就寫「無」）');
+  L.push('禁止：回貼整檔內容；動「相關檔案」以外的檔案；未經明確授權執行 commit／push／刪檔。');
+  return L.join('\n');
+}
+
+function cardHTML(it, idx, total, inp, horizontal) {
+  const unclear = it.needs.filter(k => !inp.answered[k]);
+  const open = !!state.open[it.id];
+  const text = promptText(it, idx, total, inp);
+  return `<article class="card${horizontal ? ' h' : ''}">
+    <div>
+      <h3>${rich(it.title)}</h3>
+      <div class="dep">${it.deps.length ? '相依：先完成 ' + it.deps.join('、') : '沒有前置項目，可以最先開工'}</div>
+    </div>
+    <div class="chips">
+      <span class="chip ${it.size[0]}">${it.size[1]}</span>
+      <span class="chip ${it.verify[0]}">${it.verify[1]}</span>
+      <span class="chip">${it.est}</span>
+      ${unclear.map(k => `<span class="chip bad">待釐清：${QS[k][0].replace('？', '')}</span>`).join('')}
+    </div>
+    <dl>
+      <dt>目標</dt><dd>${rich(it.goal)}</dd>
+      <dt>背景</dt><dd>${rich(it.bg)}</dd>
+      <dt>相關檔案</dt><dd>${list(it.files)}</dd>
+      <dt>限制</dt><dd>${list(it.limits)}</dd>
+      <dt>驗收條件</dt><dd>${list(it.accept)}</dd>
+      <dt>範圍外</dt><dd>${list(it.out)}</dd>
+      <dt>輸出格式</dt><dd>${rich(it.fmt)}</dd>
+    </dl>
+    <div class="acts">
+      <button class="btn" type="button" data-toggle="${it.id}" aria-expanded="${open}" aria-controls="p-${it.id}">${open ? '收起交辦 prompt' : '看交辦 prompt'}</button>
+      ${open ? `<button class="btn" type="button" data-copy="${it.id}">複製 prompt</button>` : ''}
+    </div>
+    <pre class="code wrapx" id="p-${it.id}" tabindex="0" ${open ? '' : 'hidden'}>${esc(text)}</pre>
+  </article>`;
+}
+
+function render() {
+  const inp = readInputs();
+  const horizontal = state.slice === 'h';
+  $$('[data-slice]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.slice === state.slice)));
+  $('#mode').textContent = (inp.custom ? '通用範本' : '範例需求') + '｜' + (horizontal ? '水平分層' : '垂直切片');
+
+  const items = inp.custom ? genericItems(horizontal) : (horizontal ? HORIZ : VERT);
+  const out = [];
+
+  // clarifying-question warnings
+  const miss = Object.keys(QS).filter(k => !inp.answered[k]);
+  if (inp.req.length < 12) out.push(`<div class="note bad">需求只有幾個字，連名詞都不夠。先寫清楚「誰、在什麼情況、要得到什麼」再拆。</div>`);
+  if (miss.length) {
+    out.push(`<div class="note warn"><strong>還有 ${miss.length} 個問題沒問清楚</strong>，對應的卡片會標「待釐清」，prompt 裡也會要求 agent 先問：<ul style="margin:6px 0 0;padding-left:1.2em">${miss.map(k => `<li><strong>${QS[k][0]}</strong>${QS[k][1]}</li>`).join('')}</ul></div>`);
+  } else {
+    out.push(`<div class="note ok">五個釐清問題都有答案，可以開始寫交辦包。</div>`);
+  }
+  if (inp.custom) out.push(`<div class="note">你改了需求，下面是通用範本：結構一樣，你的文字填在「整體需求」，<code>&lt;角括號&gt;</code> 是需要你自己補的地方。</div>`);
+
+  // bootstrap checklist
+  if (inp.fresh) {
+    const firstUndone = STEPS.findIndex((_, i) => !state.doneSteps.includes(i));
+    out.push(`<div><h3 class="sec-title">全新專案的起手式<span class="chip accent">${state.doneSteps.length} / ${STEPS.length} 完成</span></h3>
+      <div class="steps" role="group" aria-label="全新專案起手式">${STEPS.map((s, i) => {
+        const done = state.doneSteps.includes(i);
+        return `<div class="step${done ? ' done' : (i === firstUndone ? ' active' : '')}"><button class="stepbtn" type="button" data-step="${i}" aria-pressed="${done}"><span class="t">${s[0]}</span><span class="d">${s[1]}</span></button></div>`;
+      }).join('')}</div>
+      <p class="small muted" style="margin:6px 0 0">點一步標記完成。沒有骨架和測試框架就切片，第一張卡的驗收條件根本跑不起來。</p></div>`);
+  }
+
+  // slicing summary
+  const verifiable = items.filter(i => i.verify[0] === 'ok').length;
+  const bigCount = items.filter(i => i.size[0] === 'bad').length;
+  out.push(`<div class="stats">
+    <div class="stat"><div class="v">${items.length}</div><div class="l">張卡片</div></div>
+    <div class="stat"><div class="v">${verifiable} / ${items.length}</div><div class="l">做完就能獨立驗證</div></div>
+    <div class="stat"><div class="v">${horizontal ? '第 ' + items.length + ' 張' : '第 1 張'}</div><div class="l">最早能看到成果</div></div>
+    <div class="stat"><div class="v">${bigCount}</div><div class="l">超過一個 session</div></div>
+  </div>`);
+  if (horizontal) {
+    out.push(`<div class="note bad"><strong>水平分層的問題：</strong>所有資料表 → 所有 API → 所有畫面，前兩張做完都只能確認「編譯通過」，要到最後一張才第一次看到整條流程跑起來。欄位設計錯了、API 對不上，都在最後才爆，前面全部返工。中間那張還大到一個 session 做不完。切成垂直切片就能每一片都驗收。</div>`);
+  } else {
+    out.push(`<div class="note ok"><strong>垂直切片：</strong>第 1 張做完，系統就已經比現在正確，而且能用測試證明；後面每一片都建在已驗收的基礎上，出錯只需要退回一片。</div>`);
+  }
+
+  out.push(`<div style="display:grid;gap:12px">${items.map((it, i) => cardHTML(it, i, items.length, inp, horizontal)).join('')}</div>`);
+  $('#out').innerHTML = out.join('');
+}
+
+function copyText(id, btn) {
+  const el = document.getElementById('p-' + id);
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+  try {
+    navigator.clipboard.writeText(el.textContent).then(() => {
+      btn.textContent = '已複製';
+      setTimeout(() => { if (btn.isConnected) btn.textContent = '複製 prompt'; }, 1500);
+    }).catch(fallback);
+  } catch (e) { fallback(); }
+}
+
+$('#out').addEventListener('click', e => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  if (t.dataset.toggle) { state.open[t.dataset.toggle] = !state.open[t.dataset.toggle]; render(); const b = $(`[data-toggle="${t.dataset.toggle}"]`); if (b) b.focus(); }
+  else if (t.dataset.copy) copyText(t.dataset.copy, t);
+  else if (t.dataset.step != null) {
+    const i = +t.dataset.step, at = state.doneSteps.indexOf(i);
+    if (at >= 0) state.doneSteps.splice(at, 1); else state.doneSteps.push(i);
+    render(); const b = $(`[data-step="${i}"]`); if (b) b.focus();
+  }
+});
+$$('[data-slice]').forEach(b => b.addEventListener('click', () => { state.slice = b.dataset.slice; render(); }));
+$$('[data-q], #fresh').forEach(c => c.addEventListener('change', render));
+$('#req').addEventListener('input', render);
+
+render();
+</script>
+</body>
+</html>

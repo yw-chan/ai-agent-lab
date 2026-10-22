@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Reasoning Effort 實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .task-list { display: grid; gap: 6px; }
+  .task-list .btn { text-align: left; }
+  .seg-ctl.wrap-seg { display: flex; flex-wrap: wrap; }
+  .seg-ctl.wrap-seg button { flex: 1 1 auto; }
+  .qbar { height: 14px; border-radius: 6px; background: var(--code-bg); overflow: hidden; }
+  .qbar > i { display: block; height: 100%; background: var(--seg-output); transition: width .25s; }
+  .tbl tr.rec td { background: var(--accent-soft); }
+  .tbl tr.cur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  .tbl td.pos { color: var(--ok); }
+  .tbl td.flat { color: var(--warn); }
+  .attempt { display: grid; gap: 2px; }
+  .attempt .top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 2</span><span>面試 2</span></div>
+  <h1>Reasoning Effort 實驗</h1>
+  <p class="lede">左邊選任務類型和思考力度，右邊看這個設定在 request 裡長什麼樣、會多花多少思考 token、多久、多少錢，以及答對機率。重點是看出：簡單任務加力度只是變貴，困難任務才真的有回報。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>任務與力度</h2><span class="hint">修改後右邊即時更新</span></header>
+    <div class="body">
+      <div class="field">
+        <span class="label" id="task-label">任務類型</span>
+        <div class="task-list" id="tasks" role="group" aria-labelledby="task-label"></div>
+      </div>
+
+      <div class="field">
+        <label for="prompt">這個任務的範例 prompt</label>
+        <textarea id="prompt" rows="4"></textarea>
+        <span class="sub">可以自己改字；切換任務類型會換回該類型的範例。</span>
+      </div>
+
+      <div class="field">
+        <span class="label" id="eff-label">Effort（思考力度）</span>
+        <div class="seg-ctl wrap-seg" id="eff" role="group" aria-labelledby="eff-label"></div>
+      </div>
+
+      <div class="field">
+        <span class="label">先用預設、失敗再升級</span>
+        <span class="sub">模擬一次一次往上試：low → medium → high。每次的成敗是固定的示意結果（每種任務各自決定在哪一檔成功）。</span>
+        <div class="row">
+          <button class="btn primary" id="sim-next" type="button">試下一檔</button>
+          <button class="btn" id="sim-reset" type="button">重設模擬</button>
+        </div>
+      </div>
+
+      <p class="disclaimer">所有數字（思考 token、延遲、費用、答對機率）都是示意用的估算，不是實測。價格沿用示意單價：輸入 $3、輸出 $15（每百萬 token），思考 token 按輸出價計費。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header>
+      <h2>實際送出與回傳</h2>
+      <div class="seg-ctl" role="group" aria-label="切換顯示">
+        <button type="button" data-view="eff" aria-pressed="true">effort 寫法</button>
+        <button type="button" data-view="bud" aria-pressed="false">budget_tokens 寫法</button>
+        <button type="button" data-view="res" aria-pressed="false">Response</button>
+      </div>
+    </header>
+    <div class="body">
+      <div class="note warn" id="field-note"></div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-think">0</div><div class="l">思考 token</div></div>
+        <div class="stat"><div class="v" id="s-vis">0</div><div class="l">可見輸出 token</div></div>
+        <div class="stat"><div class="v" id="s-lat">0s</div><div class="l">延遲（示意）</div></div>
+        <div class="stat"><div class="v" id="s-cost">$0</div><div class="l">這一次費用</div></div>
+        <div class="stat"><div class="v" id="s-q">0%</div><div class="l">答對機率</div></div>
+      </div>
+      <div>
+        <div class="small muted" style="margin-bottom:6px">答對機率</div>
+        <div class="qbar" role="img" id="qbar"><i></i></div>
+      </div>
+      <pre class="code" id="json" tabindex="0"></pre>
+
+      <div>
+        <div class="small muted" style="margin-bottom:6px">同一個任務，四檔力度並排比較（遞減報酬）</div>
+        <div class="tbl" id="cmp"></div>
+        <div class="note" id="cmp-note" style="margin-top:8px"></div>
+      </div>
+
+      <div>
+        <div class="small muted" style="margin-bottom:6px">升級模擬：先用低檔，失敗再往上</div>
+        <div class="tbl" id="sim"></div>
+        <div class="note" id="sim-note" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li><strong>先用預設，失敗再升級。</strong>多數任務在低、中檔就夠；一開始就開 max，簡單任務只是白白多付好幾倍的錢和等待時間。</li>
+      <li><strong>升了沒變好，代表缺資訊，不是缺推理。</strong>如果 high 還是錯，再升到 max 通常也一樣；該去補需求、補 log、補相關程式碼，而不是繼續加思考。</li>
+      <li><strong>思考 token 按輸出價計費。</strong>看不到全文，但每一個都照輸出單價算，所以 effort 越高，費用主要是被思考 token 拉高。</li>
+      <li>難任務（找不出原因的 bug、跨模組設計）才是高力度的主場：這些任務 low 到 high 的答對率差距很大，花錢才值得。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="tokens.html"><span>← 上一題</span><b>Token 組成</b></a><a class="pg next" href="cache.html"><span>下一題 →</span><b>Prompt Cache</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { tokens, cost, fmt, usd, jsonHTML, $, $$ } = Lab;
+
+const LEVELS = ['low', 'medium', 'high', 'max'];
+const BUDGET = { low: 2000, medium: 6000, high: 16000, max: 32000 }; // 示意：換算成舊式 budget_tokens
+
+const TASKS = [
+  { id: 'lookup', name: '查資料／格式轉換', prompt: '把下面這段 JSON 轉成 CSV，欄位順序維持 id, name, qty，缺值留空。\n[{"id":1,"name":"螺絲","qty":120},{"id":2,"name":"墊片"}]',
+    think: [200, 500, 1200, 2500], vis: 300, q: [0.93, 0.95, 0.95, 0.96], rec: 'low', pass: 0,
+    why: '答案只有一種、幾乎不用推理。low 已經 93%，加到 max 只多 3 個百分點，費用卻是十幾倍。' },
+  { id: 'impl', name: '照規格實作功能', prompt: '依規格在 OrderService 新增「刪除出庫單時回補庫存」：同一個交易內先回補、再刪單，並補一個單元測試。',
+    think: [700, 2200, 6000, 13000], vis: 900, q: [0.58, 0.80, 0.90, 0.92], rec: 'medium', pass: 1,
+    why: '規格明確、需要一些規劃。low 到 medium 提升明顯；medium 到 high 還有賺；high 到 max 只剩 2 個百分點。' },
+  { id: 'bug', name: '不明原因的 bug', prompt: '報表的月結金額偶爾少算幾元，只在月底、而且只有部分客戶會發生。不知道原因，請找出來並說明。',
+    think: [1200, 4000, 11000, 24000], vis: 700, q: [0.28, 0.50, 0.76, 0.83], rec: 'high', pass: 2,
+    why: '要假設、驗證、排除，推理量大。low 不到三成，high 到 76%；再升 max 只多 7 個百分點，通常不划算。' },
+  { id: 'arch', name: '跨模組架構設計', prompt: '出貨、庫存、財務三個模組要共用「庫存異動事件」。請設計事件流，並評估一致性、失敗重送與歷史資料回溯的做法。',
+    think: [1800, 5500, 15000, 30000], vis: 1500, q: [0.20, 0.42, 0.64, 0.78], rec: 'max', pass: -1,
+    why: '需要同時權衡很多面向，答對率隨力度一路上升，到 max 仍有 14 個百分點的提升，這類任務值得開高。但若高檔還不行，先確認有沒有給足需求與限制。' }
+];
+
+const state = { task: 'impl', effort: 'medium', view: 'eff', shown: 99 };
+const taskOf = id => TASKS.find(t => t.id === id);
+
+function calc(task, level, promptText) {
+  const i = LEVELS.indexOf(level);
+  const input = 1500 + tokens(promptText);
+  const think = task.think[i];
+  const vis = task.vis;
+  const latency = 1.2 + (think + vis) / 70;
+  return { level, input, think, vis, latency, q: task.q[i], cost: cost({ input, output: think + vis }) };
+}
+
+function request(level, mode, promptText) {
+  const base = { model: 'claude-sonnet-x', max_tokens: mode === 'bud' ? BUDGET[level] + 8000 : 64000 };
+  const msg = { messages: [{ role: 'user', content: promptText }] };
+  if (mode === 'bud') return { ...base, thinking: { type: 'enabled', budget_tokens: BUDGET[level] }, ...msg };
+  return { ...base, output_config: { effort: level }, ...msg };
+}
+
+function render() {
+  const task = taskOf(state.task);
+  const promptText = $('#prompt').value;
+  const r = calc(task, state.effort, promptText);
+
+  $$('#tasks .btn').forEach(b => b.setAttribute('aria-pressed', b.dataset.id === state.task));
+  $$('#eff button').forEach(b => b.setAttribute('aria-pressed', b.dataset.level === state.effort));
+
+  $('#s-think').textContent = fmt(r.think);
+  $('#s-vis').textContent = fmt(r.vis);
+  $('#s-lat').textContent = r.latency.toFixed(1) + 's';
+  $('#s-cost').textContent = usd(r.cost);
+  $('#s-q').textContent = Math.round(r.q * 100) + '%';
+  $('#qbar').firstElementChild.style.width = (r.q * 100) + '%';
+  $('#qbar').setAttribute('aria-label', '答對機率 ' + Math.round(r.q * 100) + '%');
+
+  const note = $('#field-note');
+  if (state.view === 'res') {
+    note.textContent = '示意：回傳的 usage 只有一個 output_tokens，思考 token 已經包含在裡面，而且按輸出價計費。';
+  } else if (state.view === 'bud') {
+    note.textContent = '示意：舊式寫法，用 thinking.budget_tokens 給思考「上限」（這裡把力度換算成 ' + fmt(BUDGET[state.effort]) + '）。實際欄位名稱與是否支援，依模型和 API 版本而定。';
+  } else {
+    note.textContent = '示意：新式寫法，只告訴模型要用多大力度，由模型自己決定要想多少。欄位名稱（這裡用 output_config.effort）依模型和 API 版本而定，請以官方文件為準。';
+  }
+
+  let obj;
+  if (state.view === 'res') {
+    obj = {
+      id: 'msg_01Xyz…', type: 'message', role: 'assistant', model: 'claude-sonnet-x',
+      content: [
+        { type: 'thinking', thinking: '（推理過程；使用者通常只看到摘要，但全部計費）' },
+        { type: 'text', text: '（模型的最終回答）' }
+      ],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: r.input, output_tokens: r.think + r.vis }
+    };
+  } else {
+    obj = request(state.effort, state.view, promptText);
+  }
+  $('#json').innerHTML = jsonHTML(obj);
+
+  renderCompare(task, promptText);
+  renderSim(task, promptText);
+}
+
+function renderCompare(task, promptText) {
+  const rows = LEVELS.map(l => calc(task, l, promptText));
+  $('#cmp').innerHTML = `<table><thead><tr><th>effort</th><th class="num">思考 token</th><th class="num">延遲</th><th class="num">費用</th><th class="num">答對率</th><th>相對上一檔</th></tr></thead><tbody>${
+    rows.map((x, i) => {
+      const prev = rows[i - 1];
+      let delta = '<span class="muted">基準</span>';
+      let cls = '';
+      if (prev) {
+        const dq = Math.round((x.q - prev.q) * 100);
+        const dc = x.cost / prev.cost;
+        cls = dq >= 8 ? 'pos' : (dq <= 3 ? 'flat' : '');
+        delta = `費用 ×${dc.toFixed(1)}，答對率 ${dq >= 0 ? '+' : ''}${dq} 點`;
+      }
+      return `<tr class="${x.level === task.rec ? 'rec' : ''} ${x.level === state.effort ? 'cur' : ''}">
+        <td><code>${x.level}</code>${x.level === task.rec ? ' <span class="chip ok">建議</span>' : ''}${x.level === state.effort ? ' <span class="chip accent">目前</span>' : ''}</td>
+        <td class="num">${fmt(x.think)}</td><td class="num">${x.latency.toFixed(1)}s</td><td class="num">${usd(x.cost)}</td>
+        <td class="num">${Math.round(x.q * 100)}%</td><td class="${cls}">${delta}</td></tr>`;
+    }).join('')
+  }</tbody></table>`;
+  $('#cmp-note').textContent = task.name + '：' + task.why;
+}
+
+function runAttempts(task, promptText) {
+  const out = [];
+  let total = 0;
+  for (let i = 0; i < 3; i++) {
+    const c = calc(task, LEVELS[i], promptText);
+    total += c.cost;
+    const ok = task.pass === i;
+    out.push({ ...c, ok, total });
+    if (ok) break;
+  }
+  return out;
+}
+
+function renderSim(task, promptText) {
+  const all = runAttempts(task, promptText);
+  const shown = Math.min(state.shown, all.length);
+  const list = all.slice(0, shown);
+  const maxCalc = calc(task, 'max', promptText);
+  $('#sim-next').disabled = shown >= all.length;
+  $('#sim-reset').disabled = shown === 0;
+
+  if (!list.length) {
+    $('#sim').innerHTML = '<p class="small muted" style="margin:0">尚未開始。按左邊「試下一檔」從 low 開始。</p>';
+    $('#sim-note').className = 'note';
+    $('#sim-note').textContent = '直接開 max 的單次費用是 ' + usd(maxCalc.cost) + '（答對率約 ' + Math.round(maxCalc.q * 100) + '%）。';
+    return;
+  }
+  $('#sim').innerHTML = `<table><thead><tr><th>嘗試</th><th>結果</th><th class="num">這次費用</th><th class="num">累計費用</th></tr></thead><tbody>${
+    list.map((x, i) => `<tr><td><div class="attempt"><span><code>${x.level}</code> 第 ${i + 1} 次</span><span class="small muted">思考 ${fmt(x.think)} tokens，${x.latency.toFixed(1)}s</span></div></td>
+      <td>${x.ok ? '<span class="chip ok">成功</span>' : '<span class="chip bad">失敗</span>'}</td><td class="num">${usd(x.cost)}</td><td class="num">${usd(x.total)}</td></tr>`).join('')
+  }</tbody></table>`;
+
+  const last = list[list.length - 1];
+  const finished = last.ok || list.length === all.length;
+  let msg = '';
+  if (!finished) {
+    msg = '還沒成功，累計 ' + usd(last.total) + '。下一步要不要升級？先想想是不是資訊不夠。';
+    $('#sim-note').className = 'note';
+  } else if (last.ok) {
+    const diff = maxCalc.cost - last.total;
+    msg = '在 ' + last.level + ' 檔成功，累計 ' + usd(last.total) + '；直接開 max 一次要 ' + usd(maxCalc.cost) + '，' +
+      (diff >= 0 ? '升級法省下 ' + usd(diff) + '（約 ' + Math.round(diff / maxCalc.cost * 100) + '%）。' : '這個任務逐檔升級反而多花 ' + usd(-diff) + '，因為前面失敗的嘗試也要付錢。');
+    $('#sim-note').className = 'note ' + (diff >= 0 ? 'ok' : 'warn');
+  } else {
+    msg = '連試 low、medium、high 都失敗，累計 ' + usd(last.total) + '。升到 max 單次要 ' + usd(maxCalc.cost) + '，答對率也只有約 ' + Math.round(maxCalc.q * 100) + '%：升了沒變好，先補需求、限制與相關程式碼，比繼續加思考更有效。';
+    $('#sim-note').className = 'note bad';
+  }
+  $('#sim-note').textContent = msg;
+}
+
+// build controls
+$('#tasks').innerHTML = TASKS.map(t => `<button type="button" class="btn" data-id="${t.id}" aria-pressed="false">${Lab.esc(t.name)}</button>`).join('');
+$('#eff').innerHTML = LEVELS.map(l => `<button type="button" data-level="${l}" aria-pressed="false">${l}</button>`).join('');
+
+function setTask(id) {
+  state.task = id;
+  $('#prompt').value = taskOf(id).prompt;
+  state.shown = 99;
+}
+
+$$('#tasks .btn').forEach(b => b.addEventListener('click', () => { setTask(b.dataset.id); state.effort = taskOf(b.dataset.id).rec; render(); }));
+$$('#eff button').forEach(b => b.addEventListener('click', () => { state.effort = b.dataset.level; render(); }));
+$$('[data-view]').forEach(b => b.addEventListener('click', () => {
+  state.view = b.dataset.view;
+  $$('[data-view]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  render();
+}));
+$('#prompt').addEventListener('input', render);
+$('#sim-next').addEventListener('click', () => { state.shown = Math.min(state.shown, 3) + 1; if (state.shown > 3) state.shown = 3; render(); });
+$('#sim-reset').addEventListener('click', () => { state.shown = 0; render(); });
+
+setTask('impl');
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Subagent 實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .sboxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+  .sbox { border: 1px dashed var(--seg-system); border-radius: 10px; padding: 8px 10px; background: var(--surface-2); min-width: 0; display: grid; gap: 6px; }
+  .sbox .t { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; font-size: 13px; font-weight: 500; flex-wrap: wrap; }
+  .mainbox { border: 2px solid var(--accent); border-radius: 10px; padding: 8px 10px; display: grid; gap: 6px; }
+  .verdict { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .verdict .chip { font-size: 14px; padding: 3px 14px; }
+  .risks { display: grid; gap: 6px; }
+  fieldset.field { border: 0; padding: 0; margin: 0; }
+  fieldset.field legend { padding: 0; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+  @media (max-width: 420px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 7</span><span>面試 9</span></div>
+  <h1>Subagent 實驗</h1>
+  <p class="lede">什麼時候該把工作派給 subagent？左邊選任務、決定派不派、交辦單寫得多完整；右邊看主對話與每個子代理各自的 context、實際送出的派工指令，以及這個決定的風險。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>任務與派工設定</h2><span class="hint">修改後右邊即時更新</span></header>
+    <div class="body">
+      <div class="field">
+        <label for="sc">任務情境</label>
+        <select id="sc">
+          <option value="search" selected>在 40 個檔案裡找某個 API 的所有用法</option>
+          <option value="research">同時查三家公司的評價</option>
+          <option value="pr">審查一個 PR</option>
+          <option value="tiny">只查一個設定值</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <span class="label">誰來做</span>
+        <div class="seg-ctl" role="group" aria-label="誰來做">
+          <button type="button" data-mode="self" aria-pressed="false">主對話自己做</button>
+          <button type="button" data-mode="sub" aria-pressed="true">派 subagent</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="n">平行 subagent 數量：<b id="n-v">3</b></label>
+        <input type="range" id="n" min="1" max="4" step="1" value="3">
+        <span class="sub" id="n-sub"></span>
+      </div>
+
+      <div class="field">
+        <label for="model">subagent 使用的模型</label>
+        <select id="model">
+          <option value="small">小型（單價 0.3x）</option>
+          <option value="mid" selected>中階（單價 1x）</option>
+          <option value="top">頂規（單價 5x）</option>
+        </select>
+      </div>
+
+      <fieldset class="field">
+        <legend>交辦單（brief）有寫到哪些</legend>
+        <div class="grid2">
+          <label class="check"><input type="checkbox" data-b="goal" checked> <span>目標</span></label>
+          <label class="check"><input type="checkbox" data-b="ctx" checked> <span>背景</span></label>
+          <label class="check"><input type="checkbox" data-b="limit"> <span>限制</span></label>
+          <label class="check"><input type="checkbox" data-b="files" checked> <span>相關檔案</span></label>
+          <label class="check"><input type="checkbox" data-b="format"> <span>輸出格式</span></label>
+          <label class="check"><input type="checkbox" data-b="done" checked> <span>完成標準</span></label>
+        </div>
+        <span class="sub">子代理看不到你的對話，交辦單就是它知道的全部。</span>
+      </fieldset>
+
+      <div class="field">
+        <span class="label">常見陷阱</span>
+        <label class="check"><input type="checkbox" id="pitfall"> <span>子代理會同時改同一個檔案</span></label>
+        <label class="check"><input type="checkbox" id="verify" checked> <span>主對話會驗證子代理的結果</span></label>
+      </div>
+
+      <p class="disclaimer">所有 token、耗時與費用都是示意數字。模型單價倍率（小型 0.3x／中階 1x／頂規 5x）也是示意，用來看相對差距；費用用共用的示意單價（輸入 $3、輸出 $15／每百萬 token）乘上倍率。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>context 與派工指令</h2><span class="hint" id="mode-hint"></span></header>
+    <div class="body">
+      <div class="verdict"><span class="chip" id="verdict">—</span><span class="small" id="verdict-text"></span></div>
+
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-main">0</div><div class="l" id="l-main">主對話 token</div></div>
+        <div class="stat"><div class="v" id="s-total">0</div><div class="l" id="l-total">全部 agent 總 token</div></div>
+        <div class="stat"><div class="v" id="s-cost">$0</div><div class="l" id="l-cost">總費用（示意）</div></div>
+        <div class="stat"><div class="v" id="s-time">0</div><div class="l" id="l-time">耗時</div></div>
+      </div>
+
+      <div class="mainbox">
+        <div class="small"><b>主對話 context</b>：你一直在用的這個對話，裡面的東西之後每一輪都要重送</div>
+        <div id="main-bar"></div>
+      </div>
+
+      <div id="sub-area">
+        <div class="small muted" id="sub-cap" style="margin-bottom:6px"></div>
+        <div class="sboxes" id="sboxes"></div>
+      </div>
+
+      <div>
+        <div class="small muted" style="margin-bottom:6px" id="payload-cap"></div>
+        <pre class="code" id="payload" tabindex="0"></pre>
+      </div>
+      <div id="prompt-wrap">
+        <div class="small muted" style="margin-bottom:6px">prompt 展開（以第 1 個子代理為例；缺少的項目以淡色標出）</div>
+        <pre class="code" id="prompt" tabindex="0" style="white-space:pre-wrap"></pre>
+      </div>
+
+      <div>
+        <div class="small muted" style="margin-bottom:6px">風險</div>
+        <div class="risks" id="risks"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li>subagent 的價值是<strong>隔離上下文、平行、分工</strong>：髒活在它自己的 context 做完就丟，主對話只收一份短摘要。</li>
+      <li><strong>交辦要自給自足</strong>：目標、背景、限制、相關檔案、輸出格式、完成標準，缺哪項子代理就自己猜哪項。</li>
+      <li><strong>回報不等於事實</strong>：子代理說「完成了」只是它的描述，重要結果要由主對話抽查驗證。</li>
+      <li><strong>派太多很貴</strong>：每個子代理都有固定開銷；小查詢自己做更快更省，也不必用頂規模型做搜尋。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="memory.html"><span>← 上一題</span><b>長任務記憶</b></a><a class="pg next" href="routing.html"><span>下一題 →</span><b>模型路由</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { tokens, cost, fmt, usd, jsonHTML, bar, esc, $, $$ } = Lab;
+
+const MAIN_BASE = 12000;   // existing main conversation (system, tools, history), illustrative
+const SUB_OVER = 4000;     // each subagent's own system prompt and tools, illustrative
+const DISPATCH_SEC = 20;   // spin-up and summarising overhead per delegation
+const VERIFY_TOK = 3500, VERIFY_SEC = 12;
+
+const ITEMS = [
+  { k: 'goal', l: '目標' }, { k: 'ctx', l: '背景' }, { k: 'limit', l: '限制' },
+  { k: 'files', l: '相關檔案' }, { k: 'format', l: '輸出格式' }, { k: 'done', l: '完成標準' }
+];
+const MODELS = {
+  small: { label: '小型', mult: 0.3, time: 0.7, api: 'haiku' },
+  mid: { label: '中階', mult: 1, time: 1, api: 'sonnet' },
+  top: { label: '頂規', mult: 5, time: 1.4, api: 'opus' }
+};
+
+const SC = {
+  search: {
+    name: '在 40 個檔案裡找某個 API 的所有用法', raw: 60000, sum: 700, work: 120, par: true, fit: 'yes', type: 'Explore', desc: '搜尋 API 用法',
+    all: '全部 40 個檔案', units: ['Controllers 目錄', 'Services 目錄', 'Repositories 目錄', 'tests 目錄'],
+    b: { goal: '找出專案中所有呼叫 OrderApi.Cancel() 的位置（範圍：{u}）', ctx: '我們要把 Cancel() 改名為 Void()，需要知道會影響哪些呼叫端', limit: '只讀取，不要修改任何檔案，不要執行 build', files: '定義在 src/Api/OrderApi.cs；搜尋 src/ 底下的 *.cs', format: '回報「檔案:行號 — 一句話用途」清單，最多 30 行，不要貼整段程式', done: '指定範圍內的檔案都掃過；回報最後附上掃描檔案數' }
+  },
+  research: {
+    name: '同時查三家公司的評價', raw: 45000, sum: 900, work: 150, par: true, fit: 'yes', type: 'general-purpose', desc: '查公司評價', natural: 3,
+    all: '公司 A、B、C', units: ['公司 A', '公司 B', '公司 C', '公司 D（超出原本三家）'],
+    b: { goal: '查「{u}」的員工與客戶評價', ctx: '我們正在評估合作對象，重點是交期穩定度與售後服務', limit: '只用公開網頁，不註冊、不留個資；單一來源不超過 3 筆', files: '建議從公司官網、Google 評論、PTT 與 Dcard 討論開始', format: '回報優點與缺點各 3 點，每點附來源網址', done: '至少交叉比對 3 個獨立來源' }
+  },
+  pr: {
+    name: '審查一個 PR', raw: 30000, sum: 800, work: 90, par: false, fit: 'yes', type: 'general-purpose', desc: '審查 PR 218',
+    all: 'PR #218 全部變更', units: ['PR #218'],
+    b: { goal: '審查 PR #218「出庫單刪除回補庫存」是否正確且安全', ctx: '這是 WMS 專案；Controller 不得直接使用 DbContext', limit: '只讀，不要 push，也不要在 PR 上留言', files: 'git diff main...pr-218；Services/OutboundService.cs、Tests/', format: '依嚴重度分「必修／建議」，每項含檔案:行號與理由', done: '每個變更檔都看過；列出沒有測試覆蓋的路徑' }
+  },
+  tiny: {
+    name: '只查一個設定值', raw: 1500, sum: 100, work: 5, par: false, fit: 'no', type: 'Explore', desc: '查設定值',
+    all: 'appsettings 兩個檔案', units: ['appsettings'],
+    b: { goal: '查 appsettings.json 裡 Inventory:SafetyStockDays 的值', ctx: '正在排查補貨提醒為什麼太晚', limit: '只讀，不要修改設定', files: 'src/Api/appsettings.json 與 appsettings.Production.json', format: '一行：值與所在檔案', done: '兩個檔案都確認過' }
+  }
+};
+
+const state = { mode: 'sub' };
+
+function readState() {
+  const brief = {};
+  $$('[data-b]').forEach(c => { brief[c.dataset.b] = c.checked; });
+  return { sc: $('#sc').value, mode: state.mode, n: +$('#n').value, model: $('#model').value, brief, pitfall: $('#pitfall').checked, verify: $('#verify').checked };
+}
+
+function calc(s) {
+  const sc = SC[s.sc], mo = MODELS[s.model];
+  const missing = ITEMS.filter(i => !s.brief[i.k]);
+  const N = sc.par ? s.n : 1;
+
+  // main does it alone
+  const selfCtx = { base: MAIN_BASE, raw: sc.raw, answer: 600 };
+  const self = {
+    main: selfCtx.base + selfCtx.raw + selfCtx.answer,
+    segs: selfCtx,
+    cost: cost({ input: selfCtx.base + selfCtx.raw + selfCtx.answer, output: 800 }),
+    time: sc.work
+  };
+  self.total = self.main;
+
+  // delegate
+  const calls = [], prompts = [];
+  for (let i = 0; i < N; i++) {
+    const unit = N > 1 ? sc.units[i] : sc.all;
+    const lines = ITEMS.filter(it => s.brief[it.k]).map(it => it.l + '：' + sc.b[it.k].replace('{u}', unit));
+    const prompt = lines.join('\n');
+    prompts.push(prompt);
+    calls.push({ type: 'tool_use', id: 'toolu_0' + (i + 1) + 'Ag', name: 'Agent', input: { description: sc.desc + (N > 1 ? '：' + unit : ''), prompt, model: mo.api, subagent_type: sc.type } });
+  }
+  const briefTok = prompts.map(p => tokens(p) + 60);
+  const rawMul = 1 + (s.brief.files ? 0 : 0.25) + (s.brief.ctx ? 0 : 0.1) + (s.brief.goal ? 0 : 0.3);
+  const rawEach = Math.round(sc.raw * rawMul / N);
+  const sumEach = Math.round((sc.sum / N + 80) * (s.brief.format ? 1 : 2.2));
+  const subs = briefTok.map((b, i) => ({ unit: N > 1 ? sc.units[i] : sc.all, over: SUB_OVER, brief: b, raw: rawEach, out: sumEach + 250 }));
+  const dispatch = briefTok.reduce((a, b) => a + b, 0) + 40 * N;
+  const verify = s.verify ? VERIFY_TOK : 0;
+  const sub = {
+    N, subs, calls, prompts, missing, sumEach, dispatch, verify,
+    segs: { base: MAIN_BASE, dispatch, summary: sumEach * N, verify, answer: 400 }
+  };
+  sub.main = MAIN_BASE + dispatch + sumEach * N + verify + 400;
+  sub.total = sub.main + subs.reduce((a, x) => a + x.over + x.brief + x.raw + x.out, 0);
+  sub.cost = cost({ input: sub.main, output: dispatch + 300 }) +
+    subs.reduce((a, x) => a + mo.mult * cost({ input: x.over + x.brief + x.raw, output: x.out }), 0);
+  sub.time = sc.work * rawMul * mo.time / (sc.par ? N : 1) + DISPATCH_SEC + (s.verify ? VERIFY_SEC : 0);
+  return { sc, mo, self, sub, rawMul };
+}
+
+function risks(s, c) {
+  const out = [];
+  const sc = c.sc, sub = c.sub;
+  if (s.mode === 'self') {
+    if (sc.fit === 'yes') out.push({ l: 'warn', t: `主對話一次吞下約 ${fmt(sc.raw)} token 的原始內容，之後每一輪都要重送，也會把有用的上下文擠掉。這類任務適合派給 subagent。` });
+    else out.push({ l: 'ok', t: '任務很小，自己做最省、最快，不需要派工。' });
+    return out;
+  }
+  const m = k => !s.brief[k];
+  if (m('goal')) out.push({ l: 'bad', t: '缺目標：子代理不知道要做什麼，只能亂猜，結果很可能答非所問。' });
+  if (m('limit')) out.push({ l: 'warn', t: '缺限制：子代理可能改到不該改的檔案，或做了你沒要求的事（例如重構、build）。' });
+  if (m('format')) out.push({ l: 'warn', t: `缺輸出格式：回報難以使用，摘要膨脹到約 ${fmt(sub.sumEach)} token／個，主對話還得自己整理。` });
+  if (m('done')) out.push({ l: 'warn', t: '缺完成標準：子代理不知道何時停、什麼算做完，可能太早收工或無止境地查。' });
+  if (m('files')) out.push({ l: 'warn', t: '缺相關檔案：子代理要自己摸索，讀的內容多約 25%，更慢更貴。' });
+  if (m('ctx')) out.push({ l: 'warn', t: '缺背景：子代理不知道為什麼要查，抓不到重點，多讀約 10% 的無關內容。' });
+  if (s.pitfall) out.push({ l: sub.N > 1 ? 'bad' : 'warn', t: sub.N > 1 ? `平行改同檔：${sub.N} 個子代理同時改同一個檔案，後寫的會蓋掉先寫的，或造成衝突。要切成不重疊的檔案範圍，或改成序列。` : '子代理與主對話同時改同一個檔案，也會互相覆蓋；改檔前先確認只有一方在動它。' });
+  if (!s.verify) out.push({ l: 'bad', t: '沒驗證：子代理的回報只是它「說」做了什麼；它可能說完成但其實沒做。重要結果要抽查實際檔案或執行測試。' });
+  if (sc.fit === 'no') out.push({ l: 'warn', t: `小查詢也派：派工開銷讓總 token 是自己做的 ${(sub.total / c.self.total).toFixed(1)} 倍，耗時也更長，成本比自己做高。` });
+  if (s.model === 'top' && (s.sc === 'search' || s.sc === 'tiny' || s.sc === 'research')) out.push({ l: 'warn', t: '頂規做搜尋：這類工作靠大量讀取而不是深度推理，用頂規是浪費（單價 5x）。小型模型就夠了。' });
+  if (s.model === 'small' && s.sc === 'pr') out.push({ l: 'warn', t: '審查需要判斷力，小型模型可能漏看細節；重要的 PR 建議用中階以上。' });
+  if (s.sc === 'research' && s.n > 3) out.push({ l: 'warn', t: '只有三家公司卻切成 4 路：切得比任務還細，多出來的子代理只是多付固定開銷。' });
+  if (sc.par && sub.N >= 3 && sub.cost > c.self.cost * 1.5) out.push({ l: 'warn', t: `派太多很貴：${sub.N} 個子代理的費用約是自己做的 ${(sub.cost / c.self.cost).toFixed(1)} 倍；換來的是平行加速與乾淨的主對話，要確認值得。` });
+  if (!out.length) out.push({ l: 'ok', t: '交辦完整、有驗證、模型選得合理，沒有明顯風險。' });
+  return out;
+}
+
+function render() {
+  const s = readState();
+  const c = calc(s);
+  const sc = c.sc, mo = c.mo, sub = c.sub, self = c.self;
+  const delegating = s.mode === 'sub';
+  const cur = delegating ? sub : self;
+
+  // controls
+  $$('[data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === s.mode));
+  $('#n-v').textContent = sc.par ? s.n : 1;
+  $('#n').disabled = !(sc.par && delegating);
+  $('#n-sub').textContent = !delegating ? '自己做時沒有子代理。' : (sc.par ? '把工作切成互不重疊的幾份，各派一個，同時進行。' : '這個任務切不開，只能派一個。');
+  $('#model').disabled = !delegating;
+  $$('[data-b]').forEach(x => x.disabled = !delegating);
+  $('#pitfall').disabled = !delegating;
+  $('#verify').disabled = !delegating;
+  $('#mode-hint').textContent = delegating ? `派 ${sub.N} 個 subagent` : '主對話自己做';
+
+  // verdict
+  const rs = risks(s, c);
+  const nBad = rs.filter(x => x.l === 'bad').length, nWarn = rs.filter(x => x.l === 'warn').length;
+  const v = $('#verdict'); let vc, vt, vx;
+  if (!delegating) {
+    if (sc.fit === 'yes') { vc = 'accent'; vt = '適合派'; vx = '目前是自己做；這類任務值得派給 subagent。'; }
+    else { vc = 'ok'; vt = '不必要'; vx = '目前是自己做，這是對的：小任務不必派工。'; }
+  } else if (nBad > 0) { vc = 'bad'; vt = '有風險'; vx = `有 ${nBad} 項嚴重風險、${nWarn} 項需注意。`; }
+  else if (sc.fit === 'no') { vc = 'warn'; vt = '不必要'; vx = '這個任務太小，派工的固定開銷比任務本身還大。'; }
+  else if (nWarn >= 2) { vc = 'bad'; vt = '有風險'; vx = `交辦單或設定有 ${nWarn} 項需注意，結果可能不好用或偏貴。`; }
+  else { vc = 'ok'; vt = '適合派'; vx = nWarn ? '整體合適，還有 1 項小地方可改進。' : '任務適合派，交辦與驗證都到位。'; }
+  v.className = 'chip ' + vc; v.textContent = vt; $('#verdict-text').textContent = vx;
+
+  // stats
+  $('#s-main').textContent = fmt(cur.main);
+  $('#l-main').textContent = '主對話 token（' + (delegating ? '自己做：' + fmt(self.main) : '派工：' + fmt(sub.main)) + '）';
+  $('#s-total').textContent = fmt(cur.total);
+  $('#l-total').textContent = '全部 agent 總 token（' + (delegating ? '自己做：' + fmt(self.total) : '派工：' + fmt(sub.total)) + '）';
+  $('#s-cost').textContent = usd(cur.cost);
+  $('#l-cost').textContent = '總費用，示意（' + (delegating ? '自己做：' + usd(self.cost) : '派工：' + usd(sub.cost)) + '）';
+  $('#s-time').textContent = Math.round(cur.time) + ' 秒';
+  $('#l-time').textContent = (!delegating ? '耗時（自己做，序列）' : (sub.N > 1 ? `耗時（${sub.N} 路平行）` : '耗時（含派工開銷）')) + '，示意';
+
+  // main bar
+  const scale = Math.max(self.main, sub.main);
+  if (delegating) {
+    bar($('#main-bar'), [
+      { label: '原有對話', value: sub.segs.base, color: 'var(--seg-history)' },
+      { label: '派工指令', value: sub.segs.dispatch, color: 'var(--seg-user)' },
+      { label: '子代理摘要', value: sub.segs.summary, color: 'var(--seg-output)' },
+      { label: '驗證讀取', value: sub.segs.verify, color: 'var(--seg-cache)' },
+      { label: '回答', value: sub.segs.answer, color: 'var(--seg-system)' }
+    ].filter(x => x.value > 0), { total: scale });
+  } else {
+    bar($('#main-bar'), [
+      { label: '原有對話', value: self.segs.base, color: 'var(--seg-history)' },
+      { label: '原始內容（全部讀進來）', value: self.segs.raw, color: 'var(--seg-attach)' },
+      { label: '回答', value: self.segs.answer, color: 'var(--seg-system)' }
+    ], { total: scale });
+  }
+
+  // subagent boxes
+  if (delegating) {
+    $('#sub-cap').textContent = `每個子代理有自己獨立的 context（下方 ${sub.N} 個框），做完整個丟掉，只把摘要送回主對話。`;
+    const maxCtx = Math.max(...sub.subs.map(x => x.over + x.brief + x.raw + x.out));
+    $('#sboxes').innerHTML = sub.subs.map((x, i) => `<div class="sbox"><div class="t"><span>子代理 ${i + 1}・${esc(x.unit)}</span><span class="chip">${mo.label}</span></div><div data-sbar="${i}"></div><div class="small muted">共 ${fmt(x.over + x.brief + x.raw + x.out)} token，結束後丟棄；↑ 只回傳 ${fmt(sub.sumEach)} token 摘要</div></div>`).join('');
+    sub.subs.forEach((x, i) => bar($(`[data-sbar="${i}"]`), [
+      { label: '固定開銷', value: x.over, color: 'var(--seg-system)' },
+      { label: '交辦單', value: x.brief, color: 'var(--seg-user)' },
+      { label: '讀取內容', value: x.raw, color: 'var(--seg-attach)' },
+      { label: '摘要', value: x.out, color: 'var(--seg-output)' }
+    ], { total: maxCtx }));
+    $('#sub-area').hidden = false;
+  } else {
+    $('#sub-area').hidden = true;
+  }
+
+  // payload
+  if (delegating) {
+    $('#payload-cap').textContent = sub.N > 1 ? `主對話在同一則訊息裡發出 ${sub.N} 個 Agent tool_use（所以能平行）：` : '主對話發出的 Agent tool_use：';
+    $('#payload').innerHTML = jsonHTML({ role: 'assistant', content: sub.calls }, { clip: 90 });
+    const missingKeys = new Set(sub.missing.map(m => m.k));
+    $('#prompt').innerHTML = ITEMS.map(it => {
+      if (missingKeys.has(it.k)) return `<span class="dim hl">（缺少）${it.l}：—</span>`;
+      return esc(it.l + '：' + sc.b[it.k].replace('{u}', sub.N > 1 ? sc.units[0] : sc.all));
+    }).join('\n');
+    $('#prompt-wrap').hidden = false;
+  } else {
+    $('#payload-cap').textContent = '沒有派工：主對話自己呼叫 Read／Grep，所有結果直接進主對話：';
+    $('#payload').innerHTML = jsonHTML({ role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_01Ag', name: 'Grep', input: { pattern: 'Cancel\\(', path: 'src/' } }, { type: 'text', text: '…（之後還有很多次 Read，每次的結果都留在主對話）' }] }, { clip: 90 });
+    $('#prompt-wrap').hidden = true;
+  }
+
+  // risks
+  $('#risks').innerHTML = rs.map(x => `<div class="note ${x.l}">${esc(x.t)}</div>`).join('');
+}
+
+$$('[data-mode]').forEach(b => b.addEventListener('click', () => { state.mode = b.dataset.mode; render(); }));
+$$('select, input').forEach(el => el.addEventListener('input', render));
+render();
+</script>
+</body>
+</html>

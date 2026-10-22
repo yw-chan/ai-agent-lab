@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>開發習慣實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+.files { display: grid; gap: 4px; }
+.files .check { font-family: var(--f-mono); font-size: 13px; }
+.files .tag { font-family: var(--f-body); font-size: 11px; margin-left: 4px; }
+.lint { display: grid; gap: 6px; }
+.lint li { list-style: none; display: flex; gap: 8px; align-items: baseline; font-size: 14px; }
+.lint ul { margin: 0; padding: 0; display: grid; gap: 6px; }
+.flow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 760px) { .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.flow button { font: inherit; font-size: 13px; text-align: left; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 8px 10px; cursor: pointer; display: grid; gap: 2px; min-width: 0; }
+.flow button b { font-family: var(--f-mono); font-size: 11px; color: var(--muted); font-weight: 500; }
+.flow button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.flow button[aria-pressed="true"] b { color: var(--accent); }
+.detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 760px) { .detail { grid-template-columns: minmax(0, 1fr); } }
+.detail h3 { margin: 0 0 6px; font-size: 14px; }
+.detail ul { margin: 0; padding-left: 1.2em; }
+.full { padding-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>面試 14</span><span>面試 15</span><span>面試 16</span></div>
+  <h1>開發習慣實驗</h1>
+  <p class="lede">上半部是 commit 產生器：左邊選這次要提交的檔案、寫 message，右邊看到真正會執行的 <code>git</code> 指令和檢查結果。下半部是一套固定的開發流程，點每一步看要做什麼、在 Claude Code 裡怎麼做。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>這次要提交什麼</h2><span class="hint">勾選要放進這個 commit 的檔案</span></header>
+    <div class="body">
+      <div class="field">
+        <span class="label">已修改的檔案</span>
+        <div class="files" id="files"></div>
+        <span class="sub">一個 commit 只做一件事：修 bug 和重構、格式調整混在一起，之後很難回溯或還原。</span>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:1 1 140px">
+          <label for="type">類型</label>
+          <select id="type">
+            <option value="feat">feat：新功能</option>
+            <option value="fix" selected>fix：修 bug</option>
+            <option value="refactor">refactor：重構</option>
+            <option value="test">test：測試</option>
+            <option value="docs">docs：文件</option>
+            <option value="chore">chore：雜項</option>
+          </select>
+        </div>
+        <div class="field" style="flex:1 1 140px">
+          <label for="scope">範圍（可省略）</label>
+          <input type="text" id="scope" value="庫存">
+        </div>
+      </div>
+      <div class="field">
+        <label for="summary">摘要：改了什麼</label>
+        <input type="text" id="summary" value="刪除出庫單時回補庫存結餘">
+      </div>
+      <div class="field">
+        <label for="body">內文：為什麼這樣改</label>
+        <textarea id="body" rows="4">刪除出庫單原本只刪單據，沒有把出庫數量加回庫存結餘，造成結餘偏低。
+改為在同一個交易內先回補庫存再刪除單據，並補上整合測試。</textarea>
+      </div>
+      <div class="field">
+        <label for="wi">對應的工作項目（可省略）</label>
+        <input type="text" id="wi" value="AB#1234">
+      </div>
+      <div class="field">
+        <span class="label">提交前檢查</span>
+        <label class="check"><input type="checkbox" id="c-build" checked> <span>已建置並跑過測試</span></label>
+        <label class="check"><input type="checkbox" id="c-diff" checked> <span>看過 diff，沒有多改</span></label>
+        <label class="check"><input type="checkbox" id="c-ai"> <span>message 是 AI 草擬的，我已經確認內容正確</span></label>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>實際會執行的指令</h2><span class="chip" id="verdict"></span></header>
+    <div class="body">
+      <pre class="code" id="cmd" tabindex="0"></pre>
+      <div class="lint"><ul id="lint"></ul></div>
+      <div>
+        <div class="small muted" style="margin-bottom:6px">git log 會長這樣</div>
+        <pre class="code" id="log" tabindex="0"></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap full">
+  <div class="pane">
+    <header><h2>開發流程：先讀懂、再規劃、確認後小步實作、每步驗證、最後獨立驗收</h2></header>
+    <div class="body">
+      <div class="flow" id="flow" role="group" aria-label="開發流程步驟"></div>
+      <div class="detail" id="detail"></div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li>一個 commit 一件事；提交前先建置、跑測試、看過 diff。</li>
+      <li>message 用 <code>類型(範圍): 摘要</code>，摘要說「改了什麼」，內文說「為什麼」。</li>
+      <li>AI 可以草擬 message 和計畫，但送出前要自己確認。</li>
+      <li>面試第 16 題（自主學習）沒有標準答案：挑 1～2 件你真的做過、講得出細節的事。可以拿這個實驗室當例子：「我把常見的 AI 開發問題做成互動的模擬頁來理解。」</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="testing.html"><span>← 上一題</span><b>測試有效性</b></a><a class="pg next" href="index.html"><span>回首頁 →</span><b>Agent 實驗室</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { esc, $, $$ } = Lab;
+
+const FILES = [
+  { path: 'Services/OutboundService.cs', kind: 'fix', note: '回補庫存', on: true },
+  { path: 'Tests/OutboundServiceTests.cs', kind: 'fix', note: '整合測試', on: true },
+  { path: 'Services/ProductService.cs', kind: 'refactor', note: '順手重構', on: false },
+  { path: 'wwwroot/css/site.css', kind: 'style', note: '樣式調整', on: false },
+  { path: 'appsettings.Development.json', kind: 'secret', note: '含連線字串', on: false }
+];
+
+function renderFiles() {
+  $('#files').innerHTML = FILES.map((f, i) => `<label class="check"><input type="checkbox" id="f${i}" ${f.on ? 'checked' : ''}> <span>${esc(f.path)}<span class="chip tag ${f.kind === 'secret' ? 'bad' : f.kind === 'fix' ? 'accent' : ''}">${esc(f.note)}</span></span></label>`).join('');
+  FILES.forEach((f, i) => $('#f' + i).addEventListener('change', e => { f.on = e.target.checked; render(); }));
+}
+
+function header() {
+  const type = $('#type').value, scope = $('#scope').value.trim(), summary = $('#summary').value.trim();
+  return `${type}${scope ? `(${scope})` : ''}: ${summary}`;
+}
+
+function checks() {
+  const out = [];
+  const add = (level, text) => out.push({ level, text });
+  const staged = FILES.filter(f => f.on);
+  const summary = $('#summary').value.trim();
+  const type = $('#type').value;
+
+  if (!staged.length) add('bad', '沒有選任何檔案。');
+  if (staged.some(f => f.kind === 'secret')) add('bad', 'appsettings.Development.json 含連線字串，不要提交機密；應該放進 .gitignore 或改用 user-secrets。');
+  const kinds = new Set(staged.filter(f => f.kind !== 'secret').map(f => f.kind));
+  if (kinds.size > 1) add('warn', '這個 commit 混了不同性質的修改（' + [...kinds].map(k => ({ fix: '修 bug', refactor: '重構', style: '樣式' }[k])).join('、') + '），建議拆成多個 commit。');
+  if (type === 'fix' && !staged.some(f => f.path.startsWith('Tests/'))) add('warn', '修 bug 但沒有附測試：之後很難證明真的修好，也擋不住同樣的錯再發生。');
+  if (!summary) add('bad', '摘要不能空白。');
+  else {
+    if (summary.length > 50) add('warn', `摘要有 ${summary.length} 個字，太長；細節放到內文。`);
+    if (/[。.！!]$/.test(summary)) add('warn', '摘要結尾不用加句號。');
+    if (/^(修改|更新|update|fix|調整)$/i.test(summary)) add('warn', '摘要太模糊，看不出改了什麼。');
+  }
+  if (!$('#body').value.trim()) add('warn', '內文空白：建議寫「為什麼這樣改」，三個月後的你會感謝現在的你。');
+  if (!$('#c-build').checked) add('bad', '還沒建置、跑測試就提交，可能把壞掉的程式推給別人。');
+  if (!$('#c-diff').checked) add('warn', '沒看過 diff：可能夾帶除錯程式碼或無關的修改。');
+  if (!out.some(x => x.level !== 'ok')) add('ok', '格式正確、範圍單純，可以提交。');
+  return out;
+}
+
+function render() {
+  const staged = FILES.filter(f => f.on);
+  const body = $('#body').value.trim();
+  const wi = $('#wi').value.trim();
+  const msg = header() + (body ? '\n\n' + body : '') + (wi ? `\n\nRefs: ${wi}` : '');
+  const quoted = msg.replace(/'/g, `'\\''`);
+  $('#cmd').innerHTML = esc(
+    (staged.length ? `git add ${staged.map(f => f.path).join(' ')}\n` : '# 還沒選檔案\n') +
+    `git commit -m '${quoted}'`
+  );
+  const c = checks();
+  const icon = { ok: '✓', warn: '!', bad: '✕' };
+  $('#lint').innerHTML = c.map(x => `<li><span class="chip ${x.level}">${icon[x.level]}</span><span>${esc(x.text)}</span></li>`).join('');
+  const worst = c.some(x => x.level === 'bad') ? 'bad' : c.some(x => x.level === 'warn') ? 'warn' : 'ok';
+  const v = $('#verdict');
+  v.className = 'chip ' + worst;
+  v.textContent = { ok: '可以提交', warn: '可以更好', bad: '先不要提交' }[worst];
+  $('#log').innerHTML = esc(`a3f9c12 ${header()}\n7b1e004 test(庫存): 新增出庫單刪除的整合測試\n52d8a90 feat(出庫): 出庫單批次列印`);
+}
+
+const FLOW = [
+  { t: '理解', do: ['讀相關程式碼和需求', '列出不清楚的地方，先問清楚', '找出會受影響的模組'], cc: ['先叫 Claude 讀檔、說明現況，不要馬上改', '大範圍搜尋交給子代理，只收結論'] },
+  { t: '規劃', do: ['寫出步驟、要改的檔案', '寫驗收條件：怎樣算完成', '標出風險和不確定的地方'], cc: ['規劃模式（Shift+Tab 切換）：只讀不改，先產出計畫', '把計畫寫成檔案，長任務壓縮後還讀得回來'] },
+  { t: '確認', do: ['計畫給人看過再動手', '方向錯了在這裡改最便宜'], cc: ['看過計畫再允許開始修改', '不確定的決策由人決定，不讓 Agent 猜'] },
+  { t: '小步實作', do: ['一次改一小段', '每段改完就建置、跑測試'], cc: ['一個 session 做一個明確的小任務', '照規格實作可以交給中階模型'] },
+  { t: '審查', do: ['看 diff，確認沒有多改', '檢查邊界情況、錯誤處理'], cc: ['用 code review skill 逐維度檢查', '每個發現要有具體失敗情境'] },
+  { t: '驗收', do: ['對照驗收條件逐條確認', '不要自己說完成就算完成'], cc: ['用乾淨的上下文或另一個人檢查', '測試、建置結果是客觀證據'] },
+  { t: '收尾', do: ['commit、更新文件', '踩到的坑記下來'], cc: ['教訓寫回規範檔（例如 CLAUDE.md、lessons.md）', '下次 session 會自動載入'] }
+];
+let cur = 1;
+function renderFlow() {
+  $('#flow').innerHTML = FLOW.map((f, i) => `<button type="button" data-i="${i}" aria-pressed="${i === cur}"><b>${i + 1}</b>${esc(f.t)}</button>`).join('');
+  const f = FLOW[cur];
+  $('#detail').innerHTML = `<div><h3>要做什麼</h3><ul>${f.do.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>
+    <div><h3>在 Claude Code 裡</h3><ul>${f.cc.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+}
+$('#flow').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { cur = +b.dataset.i; renderFlow(); } });
+
+renderFiles();
+$$('#type, #scope, #summary, #body, #wi, #c-build, #c-diff, #c-ai').forEach(el => el.addEventListener('input', render));
+$$('#c-build, #c-diff, #c-ai, #type').forEach(el => el.addEventListener('change', render));
+render();
+renderFlow();
+</script>
+</body>
+</html>

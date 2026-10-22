@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>長任務記憶實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .rule-box { display: grid; gap: 4px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; }
+  .rule-box .rt { font-size: 13.5px; font-weight: 500; overflow-wrap: anywhere; }
+  .rule-box label { font-size: 12px; color: var(--muted); }
+  .btn-col { display: grid; gap: 8px; }
+  .btn-col .btn { text-align: left; }
+  .sub-brief { display: grid; gap: 6px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; }
+  .sec-title { font-size: 13px; font-weight: 700; margin: 0 0 6px; }
+  .files { display: grid; gap: 4px; }
+  .files .it { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; font-size: 13px; padding: 4px 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; }
+  .files .it .t { overflow-wrap: anywhere; }
+  .log { display: grid; gap: 6px; max-height: 300px; overflow: auto; }
+  .log .ent { font-size: 13px; padding: 7px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+  .log .ent.ok { background: var(--ok-soft); border-color: transparent; }
+  .log .ent.bad { background: var(--bad-soft); border-color: transparent; }
+  .log .ent.warn { background: var(--warn-soft); border-color: transparent; }
+  .log .ent b { display: block; }
+  .log .ent .m { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+  .wide { margin: 0 auto; padding-bottom: 20px; }
+  .tree-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 14px; padding: 14px; }
+  @media (max-width: 800px) { .tree-grid { grid-template-columns: minmax(0, 1fr); } }
+  .tree { display: grid; gap: 4px; align-content: start; }
+  .tree button { font: inherit; font-size: 13px; text-align: left; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); border-radius: 8px; padding: 6px 10px; cursor: pointer; display: grid; gap: 1px; }
+  .tree button .p { font-family: var(--f-mono); font-size: 12px; overflow-wrap: anywhere; }
+  .tree button .d { font-size: 12px; color: var(--muted); }
+  .tree button.l1 { margin-left: 14px; }
+  .tree button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .tree .grp { font-size: 11.5px; color: var(--muted); letter-spacing: .04em; margin: 6px 2px 0; }
+  .detail { display: grid; gap: 10px; min-width: 0; align-content: start; }
+  .detail h3 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+  .kv { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: 4px 10px; font-size: 13.5px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  @media (max-width: 480px) { .kv { grid-template-columns: minmax(0, 1fr); } .kv dd { margin-bottom: 6px; } }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 6</span><span>面試 7</span><span>面試 8</span></div>
+  <h1>長任務記憶實驗</h1>
+  <p class="lede">長任務一定會壓縮、換 session、交給子代理。左邊決定四條規則放在哪裡，按下各種按鈕，右邊看每一條規則還活不活著；最後讓 Agent 寫一個違規的 Controller，看誰攔得住。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>四條規則放在哪裡</h2><span class="hint">改了右邊立刻重算</span></header>
+    <div class="body">
+      <div id="rules" style="display:grid;gap:8px"></div>
+
+      <div class="btn-col">
+        <button class="btn" id="b-work" type="button">工作一段（加入 20K 工具輸出）</button>
+        <button class="btn" id="b-compact" type="button">觸發壓縮（/compact）</button>
+        <button class="btn" id="b-new" type="button">開新 session</button>
+      </div>
+
+      <div class="sub-brief">
+        <label for="brief" class="sub">子代理的交辦內容（brief）</label>
+        <textarea id="brief" rows="2">把 OutboundController 的刪除邏輯改成呼叫 StockService.Restore()，改完回報結論。</textarea>
+        <label class="check"><input type="checkbox" id="brief-rule"> <span>brief 裡寫明「Controller 不得直接使用 DbContext」</span></label>
+        <button class="btn" id="b-sub" type="button">派子代理去改檔案</button>
+      </div>
+
+      <button class="btn primary" id="b-test" type="button">讓 Agent 寫一個直接用 DbContext 的 Controller</button>
+      <button class="btn" id="b-reset" type="button">還原範例</button>
+      <p class="disclaimer">示範視窗只有 120K，方便觀察壓縮；所有 token 數、行為都是教學用的示意，實際行為依 Claude Code 版本與設定而定。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>目前上下文與規則狀態</h2><span class="hint" id="sess"></span></header>
+    <div class="body">
+      <div>
+        <div class="small muted" style="margin-bottom:6px" id="win-title"></div>
+        <div id="bar"></div>
+      </div>
+      <div>
+        <p class="sec-title">上下文裡載入了什麼</p>
+        <div class="files" id="files"></div>
+      </div>
+      <div>
+        <p class="sec-title">每條規則現在的狀態</p>
+        <div class="tbl"><table><thead><tr><th>規則</th><th>放在</th><th>狀態</th></tr></thead><tbody id="rtbl"></tbody></table></div>
+      </div>
+      <div id="sub-ctx"></div>
+      <div>
+        <p class="sec-title">事件與測試結果（新的在上面）</p>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap wide">
+  <div class="pane">
+    <header><h2>Claude Code 的記憶從哪來</h2><span class="hint">點選左邊每一項</span></header>
+    <div class="tree-grid">
+      <div class="tree" id="tree" role="group" aria-label="記憶來源"></div>
+      <div class="detail" id="detail" aria-live="polite"></div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li>規則寫進<strong>檔案</strong>（CLAUDE.md、.claude/rules），不要只在聊天裡說：聊天會被壓縮，檔案會重新載入。</li>
+      <li>真正不能違反的，用 <strong>hooks／測試</strong>強制：hook 不靠模型記得，直接擋下。</li>
+      <li>任務<strong>切小</strong>：一個 session 做一件事，做完就開新的，不要讓上下文一路膨脹。</li>
+      <li>進度寫成<strong>檔案</strong>（例如 PROGRESS.md）：換 session 或壓縮之後，新的 Agent 讀檔就能接手。</li>
+      <li>交辦子代理要<strong>寫清楚</strong>：子代理不會繼承主對話的聊天內容，只有 brief 裡寫的才可靠。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="tools.html"><span>← 上一題</span><b>Tool、MCP、Skill</b></a><a class="pg next" href="subagent.html"><span>下一題 →</span><b>Subagent</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { fmt, bar, esc, $, $$ } = Lab;
+
+/* ---------- Part A ---------- */
+const WIN = 120000;
+const SYS = 12000;
+const USER_MD = 800, PROJ_MD = 2500, AUTO_MEM = 1000, RULE_FILE = 400, SUMMARY = 6000;
+
+const R = [
+  { id: 'r1', text: 'Controller 不得直接使用 DbContext，一律透過 Service', path: '**/Controllers/*.cs', hook: '禁止在 Controller 直接使用 DbContext，請改呼叫 IOutboundService' },
+  { id: 'r2', text: '回答一律使用繁體中文', path: '**/*', hook: '偵測到非繁體中文回覆' },
+  { id: 'r3', text: '改完程式要先跑 dotnet test 才能回報完成', path: '**/*.cs', hook: '尚未執行 dotnet test，不能結束' },
+  { id: 'r4', text: '不得修改 Migrations/ 資料夾裡的檔案', path: '**/Migrations/**', hook: '禁止修改 Migrations/ 內的檔案' }
+];
+const LOC = { chat: '只在聊天說過', claude: 'CLAUDE.md', rules: '.claude/rules（依路徑套用）', hook: 'hook 強制' };
+const TOUCH = { r1: true, r2: true, r3: true, r4: false };  // does the normal working session touch this rule's paths?
+
+let S;
+function initial() {
+  return {
+    sess: 1, hist: 30000, summary: 0,
+    loc: { r1: 'chat', r2: 'claude', r3: 'rules', r4: 'hook' },
+    alive: { r1: true, r2: true, r3: true, r4: true },     // chat-only rules still in context
+    loaded: { r1: false, r2: false, r3: true, r4: false }, // path-scoped rule files loaded
+    sub: null,
+    log: [{ kind: 'info', t: 'Session 1 開始', m: '載入 ~/.claude/CLAUDE.md、./CLAUDE.md、自動記憶 MEMORY.md；你在聊天裡口頭說了幾條規則。' }]
+  };
+}
+
+function ruleFilesTok() { return R.filter(r => S.loc[r.id] === 'rules' && S.loaded[r.id]).length * RULE_FILE; }
+function claudeLines() { return R.filter(r => S.loc[r.id] === 'claude').length; }
+function memTok() { return USER_MD + PROJ_MD + claudeLines() * 150 + AUTO_MEM + ruleFilesTok(); }
+function total() { return SYS + memTok() + S.hist + S.summary; }
+function push(kind, t, m) { S.log.unshift({ kind, t, m }); S.log = S.log.slice(0, 14); }
+
+function compact(auto) {
+  const before = total();
+  S.hist = 0; S.summary = SUMMARY;
+  R.forEach(r => { S.alive[r.id] = false; S.loaded[r.id] = false; });
+  push(auto ? 'warn' : 'info', (auto ? '自動壓縮（用量達 95%）' : '手動壓縮 /compact') + '：' + fmt(before) + ' → ' + fmt(total()) + ' token',
+    '對話被濃縮成一份約 ' + fmt(SUMMARY) + ' token 的摘要，摘要偏重任務進度，口頭說過的規則很容易被省略。CLAUDE.md 與 MEMORY.md 從檔案重新載入；依路徑套用的規則檔要等再次碰到符合路徑的檔案才會載入。');
+}
+function maybeAuto() { if (total() >= WIN * 0.95) compact(true); }
+
+function status(r) {
+  const l = S.loc[r.id];
+  if (l === 'hook') return { chip: 'ok', txt: '由 hook 擋下', note: '不佔上下文，不靠模型記得' };
+  if (l === 'claude') return { chip: 'ok', txt: '每次重新載入', note: '壓縮、新 session 後都會從檔案載入' };
+  if (l === 'rules') return S.loaded[r.id]
+    ? { chip: 'accent', txt: '還在上下文', note: '已依路徑載入；壓縮後要再碰到 ' + r.path + ' 才會回來' }
+    : { chip: 'warn', txt: '尚未載入', note: '碰到符合 ' + r.path + ' 的檔案時才載入' };
+  return S.alive[r.id]
+    ? { chip: 'warn', txt: '還在上下文', note: '只是聊天紀錄，壓縮或換 session 就沒了' }
+    : { chip: 'bad', txt: '被壓縮掉', note: '摘要裡沒有，Agent 已經不知道' };
+}
+
+function renderRules() {
+  $('#rules').innerHTML = R.map((r, i) => `<div class="rule-box"><div class="rt">${i + 1}. ${esc(r.text)}</div>
+    <label for="loc-${r.id}">這條規則放在</label>
+    <select id="loc-${r.id}" data-rule="${r.id}">${Object.keys(LOC).map(k => `<option value="${k}"${S.loc[r.id] === k ? ' selected' : ''}>${LOC[k]}</option>`).join('')}</select></div>`).join('');
+}
+
+function render() {
+  const t = total();
+  $('#sess').textContent = 'Session ' + S.sess;
+  $('#win-title').textContent = '示範視窗 ' + fmt(WIN) + ' token，已用 ' + fmt(t) + '（' + Math.round(t / WIN * 100) + '%）；95% 會自動壓縮';
+  bar($('#bar'), [
+    { label: 'system＋工具', value: SYS, color: 'var(--seg-system)' },
+    { label: '記憶檔案', value: memTok(), color: 'var(--seg-tools)' },
+    { label: '對話歷史', value: S.hist, color: 'var(--seg-history)' },
+    { label: '壓縮摘要', value: S.summary, color: 'var(--seg-cache)' }
+  ].filter(x => x.value > 0), { total: Math.max(WIN, t) });
+
+  const f = [
+    ['~/.claude/CLAUDE.md（使用者層）', '每次載入', USER_MD],
+    ['./CLAUDE.md（專案層）' + (claudeLines() ? '，含 ' + claudeLines() + ' 條規則' : ''), '每次載入', PROJ_MD + claudeLines() * 150],
+    ['~/.claude/projects/…/memory/MEMORY.md（自動記憶）', '每次載入', AUTO_MEM]
+  ];
+  R.filter(r => S.loc[r.id] === 'rules' && S.loaded[r.id]).forEach(r => f.push(['.claude/rules/' + r.id + '.md（paths: ' + r.path + '）', '依路徑載入', RULE_FILE]));
+  f.push(['對話歷史（聊天、工具輸出）', S.hist ? '會被壓縮' : '空的', S.hist]);
+  if (S.summary) f.push(['壓縮摘要', '取代舊對話', S.summary]);
+  $('#files').innerHTML = f.map(x => `<div class="it"><span class="t">${esc(x[0])}</span><span class="chip">${x[1]}</span><span class="num">${fmt(x[2])}</span></div>`).join('');
+
+  $('#rtbl').innerHTML = R.map((r, i) => {
+    const s = status(r);
+    return `<tr><td>${i + 1}. ${esc(r.text)}</td><td>${LOC[S.loc[r.id]]}</td><td><span class="chip ${s.chip}">${s.txt}</span><div class="small muted">${esc(s.note)}</div></td></tr>`;
+  }).join('');
+
+  if (S.sub) {
+    const s = S.sub;
+    $('#sub-ctx').innerHTML = `<p class="sec-title">最近一次子代理看到的內容</p>
+      <div class="note">
+        <div>主對話的聊天內容：<span class="chip bad">看不到</span>（子代理不會繼承主對話的聊天內容）</div>
+        <div style="margin-top:4px">brief：<code>${esc(s.brief)}</code>${s.ruleInBrief ? '，<span class="chip ok">含規則</span>' : '，<span class="chip warn">沒寫規則</span>'}</div>
+        <div style="margin-top:4px">自己載入的檔案：專案 CLAUDE.md 等（依設定而定）；寫在檔案裡的規則通常看得到。</div>
+        <div style="margin-top:4px">回到主對話的只有結論（約 1.5K token）。</div>
+      </div>`;
+  } else $('#sub-ctx').innerHTML = '';
+
+  $('#log').innerHTML = S.log.map(e => `<div class="ent ${e.kind === 'info' ? '' : e.kind}"><b>${esc(e.t)}</b><span class="m">${esc(e.m)}</span></div>`).join('');
+}
+
+function setLoc(id, v) {
+  S.loc[id] = v;
+  if (v === 'chat') S.alive[id] = true;
+  push('info', '規則改放「' + LOC[v] + '」：' + R.find(r => r.id === id).text.slice(0, 14) + '…', v === 'chat' ? '你又在聊天裡口頭說了一次。' : v === 'hook' ? '寫進 settings 的 PreToolUse hook，由程式檢查。' : '寫進檔案，之後會依載入規則進上下文。');
+}
+
+function work() {
+  S.hist += 20000;
+  R.forEach(r => { if (S.loc[r.id] === 'rules' && TOUCH[r.id]) S.loaded[r.id] = true; });
+  push('info', '工作一段：+20K 工具輸出', '讀檔、跑指令的輸出都進了歷史，之後每一輪都要重送。碰到 .cs 檔時，符合路徑的規則檔會載入。');
+  maybeAuto();
+}
+
+function test() {
+  const r = R[0], l = S.loc.r1, t = total();
+  if (l === 'hook') {
+    push('ok', '測試：被 hook 擋下', 'PreToolUse hook 攔截 Write(OutboundController.cs)，exit code 2，訊息：「' + r.hook + '」。Agent 收到訊息後改寫成呼叫 Service。擋下與否跟上下文裡有沒有這條規則無關。');
+  } else if (l === 'claude') {
+    push(t > WIN * 0.8 ? 'warn' : 'ok', t > WIN * 0.8 ? '測試：多半會遵守（但上下文很滿）' : '測試：遵守規則',
+      'CLAUDE.md 在上下文裡，Agent 改用 Service。上下文越長、越雜，模型越可能忽略規則，所以關鍵規則仍建議再加 hook 或測試。');
+  } else if (l === 'rules') {
+    S.loaded.r1 = true;
+    push('ok', '測試：遵守規則', 'Agent 要寫 Controllers/OutboundController.cs，路徑符合 ' + r.path + '，規則檔當下載入，所以遵守。');
+  } else if (S.alive.r1) {
+    push('warn', '測試：這次遵守，但很脆弱', '規則還在聊天歷史裡所以遵守；一壓縮或開新 session 就會忘記。');
+  } else {
+    push('bad', '測試：違規', 'Agent 不知道有這條規則（已被壓縮掉或換了 session），直接在 Controller 注入 AppDbContext。這就是「只在聊天說」的下場。');
+  }
+}
+
+function subagent() {
+  const brief = $('#brief').value.trim() || '（空的 brief）';
+  const inBrief = $('#brief-rule').checked;
+  S.sub = { brief, ruleInBrief: inBrief };
+  S.hist += 1500;
+  const l = S.loc.r1;
+  let kind, t, m;
+  if (l === 'hook') { kind = 'ok'; t = '子代理：嘗試違規時被 hook 擋下'; m = 'hook 設定在專案裡，子代理的工具呼叫同樣會被攔截，不需要 brief 提醒。'; }
+  else if (l === 'claude' || l === 'rules') { kind = 'ok'; t = '子代理：通常會遵守'; m = '規則寫在檔案裡，子代理自己載入專案檔案時會看到（依路徑套用的規則要碰到符合檔案才載入）。主對話的聊天內容它看不到。'; }
+  else if (inBrief) { kind = 'ok'; t = '子代理：遵守（因為 brief 寫了）'; m = '規則只在聊天裡，但你把它寫進了 brief，所以子代理知道。'; }
+  else { kind = 'bad'; t = '子代理：很可能違規'; m = '規則只在主對話的聊天裡，子代理不會繼承聊天內容，brief 又沒寫，它完全不知道。交辦子代理要把規則、範圍、驗收標準寫清楚。'; }
+  push(kind, t, m + ' 子代理只回傳結論，約 1.5K token 進主對話。');
+  maybeAuto();
+}
+
+document.addEventListener('change', e => {
+  const s = e.target.closest('select[data-rule]');
+  if (s) { setLoc(s.dataset.rule, s.value); render(); }
+});
+$('#b-work').addEventListener('click', () => { work(); render(); });
+$('#b-compact').addEventListener('click', () => { compact(false); render(); });
+$('#b-new').addEventListener('click', () => {
+  S.sess++; S.hist = 0; S.summary = 0;
+  R.forEach(r => { S.alive[r.id] = false; S.loaded[r.id] = false; });
+  push('info', '開新 session：Session ' + S.sess, '上下文從零開始：只重新載入 CLAUDE.md 與 MEMORY.md。之前聊天裡說的規則、讀過的檔案、摘要全都沒了；進度要靠檔案接手。');
+  render();
+});
+$('#b-sub').addEventListener('click', () => { subagent(); render(); });
+$('#b-test').addEventListener('click', () => { test(); render(); });
+$('#b-reset').addEventListener('click', () => { S = initial(); renderRules(); render(); });
+
+/* ---------- Part B ---------- */
+const SRC = [
+  { grp: '常駐載入', lvl: 0, path: '~/.claude/CLAUDE.md', short: '使用者層', who: '你自己寫，跨所有專案的個人偏好。', when: '每個 session 開頭自動載入。', after: '會。壓縮後從檔案重新載入。', fits: '個人通用偏好：回答語言、程式風格、常用指令習慣。不要放專案細節。',
+    ex: '# 個人偏好\n- 回答一律使用繁體中文\n- 提交前先顯示 diff 摘要\n- 不確定時先問，不要猜' },
+  { grp: '常駐載入', lvl: 0, path: './CLAUDE.md', short: '專案層', who: '團隊一起維護，放進 git。', when: '在該專案啟動 session 時自動載入。', after: '會。壓縮後重新從檔案載入，不會被摘要掉。', fits: '專案架構、建置與測試指令、必守規範（例如 Controller 不得用 DbContext）。保持精簡，太長會稀釋。',
+    ex: '# Shop 專案\n## 指令\n- build: dotnet build\n- test: dotnet test\n## 規範\n- Controller 不得直接使用 DbContext，\n  一律透過 Service\n- 詳細分層見 @docs/architecture.md' },
+  { grp: '依需要載入', lvl: 1, path: './src/Orders/CLAUDE.md', short: '子資料夾', who: '負責該模組的人寫。', when: '讀到或修改該資料夾的檔案時才載入（不是開頭就載入）。', after: '壓縮後不在上下文，下次再讀到該資料夾的檔案才會重新載入。', fits: '只對某個模組有效的細節：模組內的慣例、容易踩的坑。',
+    ex: '# Orders 模組\n- 出庫單刪除必須同交易回補庫存\n- 金額一律用 decimal，不要用 double' },
+  { grp: '依需要載入', lvl: 1, path: '.claude/rules/*.md', short: '依路徑套用的規則', who: '團隊寫，一條主題一個檔，放進 git。', when: '沒有 paths 的規則像 CLAUDE.md 一樣開頭載入；有 paths 的，碰到符合路徑的檔案時才載入。', after: '沒有 paths 的會重新載入；有 paths 的要再碰到符合的檔案才回來。', fits: '只對特定檔案類型或資料夾適用的規則，避免每次都佔上下文。',
+    ex: '---\npaths:\n  - "**/Controllers/*.cs"\n---\n# Controller 規則\n- 不得注入 DbContext\n- 一律回傳 ActionResult<T>' },
+  { grp: '跨 session 記憶', lvl: 0, path: '~/.claude/projects/<專案>/memory/MEMORY.md', short: '自動記憶', who: 'Claude 自己在工作中判斷值得記的事，寫成檔；你也可以編輯。MEMORY.md 是索引，旁邊有一個個記憶檔。', when: '每個 session 開頭載入索引（MEMORY.md 的開頭部分）；個別記憶檔需要時才讀。', after: '會。索引重新載入；細節檔要用到時再讀。', fits: '跨 session 要記得的事：你的偏好、踩過的坑、專案決策的原因。',
+    ex: '# MEMORY.md\n- [測試要連真資料庫](feedback_db.md)\n  不要 mock 資料庫，上次 mock 掩蓋了\n  migration 失敗\n- [庫存回補決策](project_stock.md)' },
+  { grp: '語法與指令', lvl: 0, path: '@路徑 匯入', short: '@import', who: '寫 CLAUDE.md 的人。', when: '所屬的 CLAUDE.md 載入時，一併展開被匯入的檔案。', after: '跟著所屬的 CLAUDE.md 一起重新載入。', fits: '把長文件拆成多個檔，主檔只留索引；但匯入的內容仍會進上下文，不是免費的。',
+    ex: '# CLAUDE.md\n詳細分層請看 @docs/architecture.md\n部署流程請看 @docs/deploy.md' },
+  { grp: '語法與指令', lvl: 0, path: '/memory', short: '管理記憶', who: '你在對話中輸入。', when: '你執行時：列出目前載入了哪些記憶檔，並可開啟編輯。', after: '不適用（它是管理指令，不是記憶來源）。', fits: '懷疑 Agent 沒看到某條規則時，先用它確認檔案有沒有載入。',
+    ex: '> /memory\n已載入：\n  ~/.claude/CLAUDE.md\n  ./CLAUDE.md\n  .claude/rules/controllers.md' },
+  { grp: '語法與指令', lvl: 0, path: '/compact', short: '壓縮', who: '你輸入，或用量到 95% 時自動觸發。', when: '把目前整段對話濃縮成摘要，取代舊內容。可在後面加說明指定保留重點。', after: '摘要只有對話的濃縮，CLAUDE.md 與 MEMORY.md 重新從檔案載入。', fits: '同一個任務做到一半、上下文太長但還要繼續時。聊天裡說過的規則請先寫進檔案。',
+    ex: '> /compact 保留：正在修 OrderService 庫存回補、\n  已確認問題在 DeleteOutboundAsync' },
+  { grp: '語法與指令', lvl: 0, path: '/clear', short: '清空', who: '你輸入。', when: '立刻清空整段對話，不產生摘要。', after: '之後從零開始，CLAUDE.md 與 MEMORY.md 重新載入。', fits: '換成不相關的新任務時。要接續的進度先寫成檔案再清。',
+    ex: '> /clear\n（對話歸零，只剩 CLAUDE.md、MEMORY.md）' }
+];
+let selSrc = 1;
+function renderTree() {
+  let last = '';
+  $('#tree').innerHTML = SRC.map((s, i) => {
+    const g = s.grp !== last ? `<div class="grp">${s.grp}</div>` : '';
+    last = s.grp;
+    return g + `<button type="button" class="${s.lvl ? 'l1' : ''}" data-src="${i}" aria-pressed="${i === selSrc}"><span class="p">${esc(s.path)}</span><span class="d">${esc(s.short)}</span></button>`;
+  }).join('');
+  const s = SRC[selSrc];
+  $('#detail').innerHTML = `<h3>${esc(s.path)}（${esc(s.short)}）</h3>
+    <dl class="kv"><dt>誰寫的</dt><dd>${esc(s.who)}</dd><dt>什麼時候載入</dt><dd>${esc(s.when)}</dd><dt>壓縮後會不會重新載入</dt><dd>${esc(s.after)}</dd><dt>適合放什麼</dt><dd>${esc(s.fits)}</dd></dl>
+    <div class="small muted">範例內容</div><pre class="code" tabindex="0">${esc(s.ex)}</pre>`;
+}
+$('#tree').addEventListener('click', e => {
+  const b = e.target.closest('button[data-src]');
+  if (!b) return;
+  selSrc = +b.dataset.src; renderTree(); const nb = document.querySelector('#tree button[aria-pressed="true"]'); if (nb) nb.focus();
+});
+
+S = initial();
+renderRules();
+render();
+renderTree();
+</script>
+</body>
+</html>

@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Context Window 實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .acts { display: grid; gap: 6px; }
+  .act { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .act .btn { text-align: left; }
+  .act .sz { font-family: var(--f-mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .pair-title { font-size: 12px; color: var(--muted); margin: 4px 0 -2px; }
+  .gauge-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .gauge-top .big { font-family: var(--f-mono); font-size: 28px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .gauge { position: relative; }
+  .gauge .tbar { height: 30px; }
+  .gauge .mark { position: absolute; top: -3px; height: 36px; width: 0; z-index: 1; border-left: 2px dashed var(--bad); }
+  .gauge .mark span { position: absolute; top: -17px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--bad); white-space: nowrap; }
+  .meter { height: 10px; border-radius: 999px; background: var(--code-bg); overflow: hidden; }
+  .meter > i { display: block; height: 100%; background: var(--ok); transition: width .25s; }
+  .meter.mid > i { background: var(--warn); }
+  .meter.low > i { background: var(--bad); }
+  .items { display: grid; gap: 4px; max-height: 240px; overflow: auto; }
+  .items .it { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; font-size: 13px; padding: 4px 8px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; }
+  .items .it .t { overflow-wrap: anywhere; }
+  .ba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  @media (max-width: 520px) { .ba { grid-template-columns: minmax(0, 1fr); } }
+  .ba > div { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .ba h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); font-weight: 500; }
+  .sec-title { font-size: 13px; font-weight: 700; margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 4</span><span>面試 4</span><span>面試 5</span></div>
+  <h1>Context Window 實驗</h1>
+  <p class="lede">左邊決定這一輪要把什麼塞進上下文，右邊看窗口被填到幾成、每一輪多貴、品質掉多少。把整個資料夾或整份 log 塞進去試試，再看看 /clear 和壓縮會留下什麼。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>這一輪要放進上下文的東西</h2><span class="hint">按一下就加進去</span></header>
+    <div class="body">
+      <div class="field">
+        <span class="label">上下文上限（Context limit）</span>
+        <div class="seg-ctl" role="group" aria-label="上下文上限">
+          <button type="button" data-limit="200000" aria-pressed="true">200K</button>
+          <button type="button" data-limit="1000000" aria-pressed="false">1M</button>
+        </div>
+        <span class="sub">1M 是「輸入＋輸出合計」的上限；放得下不代表放滿一樣準，也不代表一樣便宜。</span>
+      </div>
+
+      <div class="field">
+        <span class="label">讀檔：全部讀 vs 只讀需要的</span>
+        <div class="acts" id="acts-a"></div>
+      </div>
+      <div class="field">
+        <span class="label">建置失敗的 log</span>
+        <div class="acts" id="acts-b"></div>
+      </div>
+      <div class="field">
+        <span class="label">工具回傳資料</span>
+        <div class="acts" id="acts-c"></div>
+      </div>
+      <div class="field">
+        <span class="label">對話與子代理</span>
+        <div class="acts" id="acts-d"></div>
+      </div>
+
+      <div class="field">
+        <span class="label">規則「Controller 不得直接用 DbContext」放在哪</span>
+        <div class="seg-ctl" role="group" aria-label="規則存放位置">
+          <button type="button" data-rule="chat" aria-pressed="true">只在聊天裡說</button>
+          <button type="button" data-rule="file" aria-pressed="false">寫在 CLAUDE.md</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">管理上下文</span>
+        <label for="keep" class="sub">壓縮時要保留的重點（相當於 /compact 後面接的說明，可留空）</label>
+        <input type="text" id="keep" value="目前在修 OrderService 的庫存回補 bug">
+        <div class="row" style="margin-top:6px">
+          <button class="btn primary" id="compact" type="button">壓縮（/compact）</button>
+          <button class="btn" id="clear" type="button">清空（/clear）</button>
+          <button class="btn" id="reset" type="button">還原範例</button>
+        </div>
+      </div>
+      <p class="disclaimer">所有 token 數、品質分數、價格都是示意估算，不是實測值；單價用輸入 $3／百萬 token。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>上下文裡實際有什麼</h2><span class="hint">每一輪整包重送</span></header>
+    <div class="body">
+      <div>
+        <div class="gauge-top">
+          <div class="big" id="g-num">0</div>
+          <div class="small muted" id="g-pct"></div>
+        </div>
+        <div class="gauge" style="margin-top:20px">
+          <div class="mark" id="g-mark"><span>95% 自動壓縮</span></div>
+          <div id="g-bar"></div>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-total">0</div><div class="l">目前總 token</div></div>
+        <div class="stat"><div class="v" id="s-cost">$0</div><div class="l">下一輪輸入費用</div></div>
+        <div class="stat"><div class="v" id="s-noise">0%</div><div class="l">無關內容佔比</div></div>
+        <div class="stat"><div class="v" id="s-q">0</div><div class="l">品質指標（估）</div></div>
+      </div>
+      <div>
+        <div class="meter" id="q-meter" role="img" aria-label="品質指標"><i id="q-fill"></i></div>
+        <div class="small muted" style="margin-top:4px" id="q-why"></div>
+      </div>
+      <div id="warns" style="display:grid;gap:8px"></div>
+
+      <div>
+        <p class="sec-title">目前在上下文裡的項目</p>
+        <div class="items" id="items"></div>
+      </div>
+
+      <div>
+        <p class="sec-title">壓縮與規則</p>
+        <div id="compact-box"></div>
+      </div>
+
+      <div>
+        <p class="sec-title">這一輪實際送出的 messages（骨架，長內容已截短）</p>
+        <pre class="code" id="json" tabindex="0"></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li>上下文裡的每一個 token <strong>每一輪都重送、重付</strong>；一次貼進 80K 的 log，之後每一輪都在背著它。</li>
+      <li>放得越多不等於越準：太長會「注意力稀釋」，中段的內容最容易被忽略（lost in the middle）。無關內容越多，品質越差。</li>
+      <li>用 grep、jq、只貼錯誤行、派子代理只回結論，把<strong>進入上下文的量</strong>降下來。</li>
+      <li>「1M context」是輸入加輸出的合計上限；部分模型超過 200K 還會改用較高的長上下文單價。</li>
+      <li>必須遵守的規則寫進 <strong>CLAUDE.md</strong>：壓縮會把聊天內容摘要掉，CLAUDE.md 則會重新載入。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="cache.html"><span>← 上一題</span><b>Prompt Cache</b></a><a class="pg next" href="tools.html"><span>下一題 →</span><b>Tool、MCP、Skill</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { tokens, fmt, usd, jsonHTML, bar, esc, $, $$ } = Lab;
+
+const BASE_FIXED = 15000;     // system prompt + tool definitions
+const CLAUDE_MD = 2000;       // CLAUDE.md content when the rule lives there
+const IN_PRICE = 3;           // USD per 1M input tokens (illustrative)
+
+// rel = share of the item that is actually useful for the current task
+const DEFS = {
+  repo:  { name: '讀整個專案資料夾', tokens: 400000, rel: 0.02, group: 'a', tool: 'Read（遞迴讀取 ./）' },
+  files: { name: '只讀 3 個相關檔案', tokens: 6000, rel: 1, group: 'a', tool: 'Read（OrderService.cs 等 3 檔）' },
+  log:   { name: '貼上整份建置 log', tokens: 80000, rel: 0.03, group: 'b', tool: null },
+  err:   { name: '只貼錯誤那幾行', tokens: 1500, rel: 1, group: 'b', tool: null },
+  json:  { name: '工具回傳整包 JSON', tokens: 30000, rel: 0.03, group: 'c', tool: 'mcp__tfs__wi_list（未過濾）' },
+  jq:    { name: '用 jq 過濾後的結果', tokens: 400, rel: 1, group: 'c', tool: 'Bash: ... | jq \'.items[] | {id,state}\'' },
+  chat:  { name: '多聊 10 輪', tokens: 25000, rel: 0.15, group: 'd', tool: null },
+  sub:   { name: '派子代理讀檔，只回結論', tokens: 1500, rel: 1, group: 'd', tool: 'Task（子代理的讀檔過程不進主上下文）' }
+};
+
+let state;
+function initial() {
+  return {
+    limit: 200000,
+    ruleLoc: 'chat',
+    ruleAlive: true,       // is the chat-only rule still in context
+    items: [
+      { key: 'files', n: 1 }, { key: 'chat', n: 1 }, { key: 'log', n: 1 }
+    ].map(x => mk(x.key)),
+    last: null             // last compaction event
+  };
+}
+function mk(key) { const d = DEFS[key]; return { key, name: d.name, tokens: d.tokens, rel: d.rel, summary: false }; }
+
+function totals() {
+  const fixed = BASE_FIXED + (state.ruleLoc === 'file' ? CLAUDE_MD : 0);
+  let rel = 0, noise = 0, summary = 0;
+  for (const it of state.items) {
+    if (it.summary) summary += it.tokens;
+    else { rel += it.tokens * it.rel; noise += it.tokens * (1 - it.rel); }
+  }
+  rel = Math.round(rel); noise = Math.round(noise);
+  return { fixed, rel, noise, summary, total: fixed + rel + noise + summary };
+}
+
+function quality(t) {
+  const fill = t.total / state.limit;
+  const noiseShare = t.noise / Math.max(1, t.total);
+  const dilute = Math.min(1, t.total / 60000);          // tiny contexts have little to dilute
+  let q = 98 - 30 * Math.min(1.2, fill) - 45 * noiseShare * dilute;
+  if (t.total > 200000) q -= 6;
+  return { q: Math.max(5, Math.round(q)), fill, noiseShare };
+}
+
+function compactNow(auto, why) {
+  const t = totals();
+  const keep = $('#keep').value.trim();
+  const kept = /DbContext|Controller/i.test(keep);
+  const sumTok = Math.min(9000, 3000 + Math.round(t.rel * 0.12) + tokens(keep));
+  state.last = {
+    auto, why, before: t.total, after: 0,
+    ruleLoc: state.ruleLoc, keepText: keep, ruleKept: state.ruleLoc === 'file' || (state.ruleAlive && kept)
+  };
+  state.items = [{ key: 'summary', name: '壓縮摘要（模型自己寫的）', tokens: sumTok, rel: 1, summary: true }];
+  if (state.ruleLoc === 'chat') state.ruleAlive = kept;
+  state.last.after = totals().total;
+}
+
+function add(key) {
+  state.items.push(mk(key));
+  const t = totals();
+  if (t.total >= state.limit * 0.95) {
+    const keepRule = true;
+    compactNow(true, t.total > state.limit
+      ? '加進去之後共 ' + fmt(t.total) + ' token，已超過上限，實際上會在讀檔途中被截斷並觸發壓縮'
+      : '用量到達 95%，Claude Code 自動壓縮');
+  }
+  render();
+}
+
+function mkActs() {
+  ['a', 'b', 'c', 'd'].forEach(g => {
+    const box = $('#acts-' + g);
+    box.innerHTML = Object.keys(DEFS).filter(k => DEFS[k].group === g).map(k => {
+      const d = DEFS[k];
+      return `<div class="act"><button class="btn" type="button" data-add="${k}">＋ ${esc(d.name)}</button><span class="sz">${d.rel >= 0.5 ? '相關' : '無關'} ~${d.tokens >= 1000 ? (d.tokens / 1000) + 'K' : d.tokens}</span></div>`;
+    }).join('');
+  });
+}
+
+function msgSkeleton() {
+  const msgs = [];
+  for (const it of state.items) {
+    if (it.summary) {
+      msgs.push({ role: 'user', content: '以下是先前對話的摘要：' + (state.last ? '使用者目前在修 OrderService 庫存回補的問題；已讀過 3 個檔案；建置曾失敗。' + (state.last.ruleKept && state.ruleLoc === 'chat' ? '規則：Controller 不得直接用 DbContext。' : '') : '') + '（約 ' + fmt(it.tokens) + ' token）' });
+      continue;
+    }
+    const d = DEFS[it.key];
+    if (it.key === 'chat') {
+      msgs.push({ role: 'user', content: '（連續 10 輪來回的討論，約 ' + fmt(it.tokens) + ' token）' });
+    } else if (it.key === 'log' || it.key === 'err') {
+      msgs.push({ role: 'user', content: (it.key === 'log' ? '建置失敗了，這是完整 log：\n' : '建置失敗，錯誤如下：\n') + 'error CS1061: \'OutboundController\' does not contain a definition for \'Restore\'…（約 ' + fmt(it.tokens) + ' token）' });
+    } else {
+      const id = 'toolu_' + (msgs.length + 1);
+      msgs.push({ role: 'assistant', content: [{ type: 'tool_use', id, name: d.tool.split('（')[0].split(':')[0], input: { note: d.tool } }] });
+      msgs.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: '（工具回傳內容，約 ' + fmt(it.tokens) + ' token）…' }] });
+    }
+  }
+  if (state.ruleLoc === 'chat' && state.ruleAlive) msgs.unshift({ role: 'user', content: '記住：Controller 不得直接用 DbContext，一律透過 Service。' });
+  const shown = msgs.length > 12 ? [...msgs.slice(0, 4), { '…': '省略 ' + (msgs.length - 8) + ' 則訊息' }, ...msgs.slice(-4)] : msgs;
+  return {
+    model: 'claude-sonnet-x',
+    max_tokens: 8000,
+    system: [{ type: 'text', text: 'You are a coding agent…（system prompt＋工具定義，約 ' + fmt(BASE_FIXED) + ' token）' + (state.ruleLoc === 'file' ? '\n# CLAUDE.md\nController 不得直接使用 DbContext，一律透過 Service。…' : '') }],
+    messages: [...shown, { role: 'user', content: '（這一輪新的提問）' }]
+  };
+}
+
+function render() {
+  const t = totals();
+  const { q, fill, noiseShare } = quality(t);
+  const lim = state.limit;
+  $$('[data-limit]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.limit === lim));
+  $$('[data-rule]').forEach(b => b.setAttribute('aria-pressed', b.dataset.rule === state.ruleLoc));
+
+  $('#g-num').textContent = fmt(t.total) + ' / ' + (lim / 1000) + 'K';
+  $('#g-pct').textContent = '已用 ' + Math.round(fill * 100) + '%　剩 ' + fmt(Math.max(0, lim - t.total)) + ' token';
+  $('#g-mark').style.left = '95%';
+  bar($('#g-bar'), [
+    { label: '固定載入（system、工具、CLAUDE.md）', value: t.fixed, color: 'var(--seg-system)' },
+    { label: '相關內容', value: t.rel, color: 'var(--seg-history)' },
+    { label: '無關內容（噪音）', value: t.noise, color: 'var(--seg-attach)' },
+    { label: '壓縮摘要', value: t.summary, color: 'var(--seg-cache)' }
+  ].filter(x => x.value > 0), { total: Math.max(lim, t.total) });
+
+  $('#s-total').textContent = fmt(t.total);
+  const c = t.total * IN_PRICE / 1e6;
+  $('#s-cost').textContent = usd(c);
+  $('#s-noise').textContent = Math.round(noiseShare * 100) + '%';
+  $('#s-q').textContent = q;
+  const m = $('#q-meter');
+  m.className = 'meter' + (q < 45 ? ' low' : q < 70 ? ' mid' : '');
+  $('#q-fill').style.width = q + '%';
+  $('#q-why').textContent = q >= 80 ? '內容精簡，模型比較能抓到重點。'
+    : q >= 55 ? '開始變長、夾雜無關內容：重要訊息容易被稀釋，中段內容最容易被忽略。'
+    : '又長又雜：注意力被無關內容稀釋（lost in the middle），規則與細節容易被漏掉，回答品質明顯下降。';
+
+  const w = [];
+  w.push(`<div class="note">這個上下文每一輪都要整包重送：下一輪光輸入就是 <b>${usd(c)}</b>（示意，未計快取；走 10 輪約 ${usd(c * 10)}）。</div>`);
+  if (t.total > 200000) w.push(`<div class="note warn">超過 200K：<b>部分模型</b>在這種長上下文會改用較高的單價（輸入、輸出都更貴），而且延遲變長。</div>`);
+  if (lim === 1000000) w.push(`<div class="note">「1M context」指<b>輸入加輸出合計</b>可到 1M。放得下不代表放滿一樣準，也不代表一樣便宜。</div>`);
+  if (fill >= 0.7 && fill < 0.95) w.push(`<div class="note warn">已用 ${Math.round(fill * 100)}%，快到自動壓縮門檻了。</div>`);
+  if (noiseShare > 0.5) w.push(`<div class="note bad">超過一半是無關內容。改成只貼錯誤行、用 grep／jq 過濾，品質和費用都會明顯改善。</div>`);
+  $('#warns').innerHTML = w.join('');
+
+  const rows = [
+    `<div class="it"><span class="t">固定：system prompt＋工具定義</span><span class="chip">固定</span><span class="num">${fmt(BASE_FIXED)}</span></div>`
+  ];
+  if (state.ruleLoc === 'file') rows.push(`<div class="it"><span class="t">CLAUDE.md（含 DbContext 規則，每次重新載入）</span><span class="chip ok">固定</span><span class="num">${fmt(CLAUDE_MD)}</span></div>`);
+  state.items.forEach(it => {
+    const chip = it.summary ? '<span class="chip accent">摘要</span>' : it.rel >= 0.5 ? '<span class="chip ok">相關</span>' : '<span class="chip bad">無關</span>';
+    rows.push(`<div class="it"><span class="t">${esc(it.name)}</span>${chip}<span class="num">${fmt(it.tokens)}</span></div>`);
+  });
+  $('#items').innerHTML = rows.join('');
+
+  renderCompact(t, fill);
+  $('#json').innerHTML = jsonHTML(msgSkeleton(), { clip: 70 });
+}
+
+function ruleLine() {
+  if (state.ruleLoc === 'file') return `<div class="note ok">規則寫在 <code>CLAUDE.md</code>：每個 session 開頭、壓縮之後都會重新從檔案載入，不會被摘要掉。</div>`;
+  return state.ruleAlive
+    ? `<div class="note warn">規則只在聊天裡說過：目前還在歷史裡，但一壓縮或 /clear 就可能被摘要掉。</div>`
+    : `<div class="note bad">規則只在聊天裡說過，而且已經被壓縮或清空掉了：Agent 現在<b>不知道</b>「Controller 不得直接用 DbContext」，下一個 Controller 可能就違規。</div>`;
+}
+
+function renderCompact(t, fill) {
+  const L = state.last;
+  let html = ruleLine();
+  if (!L) {
+    html += `<div class="small muted" style="margin-top:8px">還沒有壓縮過。用量到 95%（${fmt(state.limit * 0.95)} token）會自動壓縮；也可以按左邊的「壓縮」手動觸發。試試加入「讀整個專案資料夾」。</div>`;
+  } else {
+    const ruleText = L.ruleLoc === 'file'
+      ? '<span class="chip ok">CLAUDE.md 重新載入</span> 規則還在'
+      : L.ruleKept ? '<span class="chip warn">只因為你在重點裡提到才留下</span>' : '<span class="chip bad">被摘要掉了</span> 規則消失';
+    html += `<div class="small" style="margin:8px 0 6px"><span class="chip ${L.auto ? 'warn' : 'accent'}">${L.auto ? '自動壓縮' : '手動壓縮'}</span> ${esc(L.why || '你按了「壓縮」，保留重點：「' + (L.keepText || '無') + '」')}</div>
+    <div class="ba">
+      <div><h4>壓縮前</h4><b class="num" style="font-size:16px">${fmt(L.before)}</b> token<br><span class="small muted">讀檔結果、log、整段對話原文</span></div>
+      <div><h4>壓縮後</h4><b class="num" style="font-size:16px">${fmt(L.after)}</b> token<br><span class="small muted">一份摘要＋重新載入的 CLAUDE.md</span></div>
+    </div>
+    <div class="small" style="margin-top:6px">「Controller 不得直接用 DbContext」：${ruleText}</div>`;
+  }
+  $('#compact-box').innerHTML = html;
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.add) add(b.dataset.add);
+  else if (b.dataset.limit) { state.limit = +b.dataset.limit; render(); }
+  else if (b.dataset.rule) { state.ruleLoc = b.dataset.rule; if (b.dataset.rule === 'chat') state.ruleAlive = true; render(); }
+  else if (b.id === 'compact') { compactNow(false); render(); }
+  else if (b.id === 'clear') {
+    state.items = []; state.last = { auto: false, why: '你執行了 /clear：整段對話直接清空，沒有摘要', before: totals().total, after: 0, ruleLoc: state.ruleLoc, ruleKept: state.ruleLoc === 'file' };
+    state.ruleAlive = false; state.last.after = totals().total; render();
+  }
+  else if (b.id === 'reset') { state = initial(); render(); }
+});
+
+state = initial();
+mkActs();
+render();
+</script>
+</body>
+</html>

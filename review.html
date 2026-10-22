@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Code Review Skill 實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .pane.out { position: static; }
+  #diff { position: relative; padding: 8px 0; max-height: 440px; }
+  .dl { display: block; min-width: max-content; padding: 0 10px 0 0; }
+  .dl .gn { display: inline-block; width: 3.2em; text-align: right; padding-right: 8px; margin-right: 8px; color: var(--muted); border-right: 1px solid var(--line); user-select: none; }
+  .dl.add { background: var(--ok-soft); }
+  .dl.del { background: var(--bad-soft); }
+  .dl.hunk, .dl.file { color: var(--muted); }
+  .dl.file { font-weight: 500; padding-top: 4px; }
+  .dl.sel { background: var(--warn-soft); outline: 2px solid var(--warn); outline-offset: -2px; }
+  .dims { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
+  @media (max-width: 420px) { .dims { grid-template-columns: minmax(0, 1fr); } }
+  .toggles { display: grid; gap: 8px; }
+  .toggles .btn { text-align: left; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+  .toggles .btn .st { font-family: var(--f-mono); font-size: 12px; }
+  .steps .step { font-size: 13px; }
+  .steps .step b { font-weight: 500; }
+  .steps .step .d { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .steps .step:not(.active):not(.done) { opacity: .6; }
+  .fd { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); min-width: 0; }
+  .fd + .fd { margin-top: 8px; }
+  .fd-h { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 9px 12px; cursor: pointer; border-radius: 10px; }
+  .fd-h:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .fd-h .meta { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-bottom: 3px; font-size: 12px; color: var(--muted); }
+  .fd-h .ttl { font-weight: 500; overflow-wrap: anywhere; }
+  .fd.sel { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn); }
+  .fd .det { padding: 0 12px 10px; display: grid; gap: 6px; font-size: 13.5px; }
+  .fd .det b { font-weight: 500; }
+  .fd.excl .ttl { text-decoration: line-through; color: var(--muted); }
+  .fd.excl .det .why { color: var(--ok); }
+  .fd.noise { border-style: dashed; border-color: var(--warn); }
+  .loc { font-family: var(--f-mono); }
+  #skill { max-height: 460px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .hint-list { display: grid; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 10</span><span>面試 12</span></div>
+  <h1>Code Review Skill 實驗</h1>
+  <p class="lede">左邊是一份藏了問題的 C# diff，你決定要審哪些維度、要不要「對抗性驗證」。右邊即時看到審查報告、結構化 JSON，以及這份設定對應的 SKILL.md。點任何一個發現，會在 diff 裡標出那一行。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>待審查的 diff</h2><span class="hint" id="diff-stat"></span></header>
+    <div class="body">
+      <pre class="code" id="diff" tabindex="0" aria-label="待審查的 diff"></pre>
+
+      <div class="field">
+        <span class="label" id="dim-label">審查維度</span>
+        <div class="dims" role="group" aria-labelledby="dim-label" id="dims"></div>
+        <span class="sub">取消勾選的維度，對應的發現不會出現在報告裡。</span>
+      </div>
+
+      <div class="toggles">
+        <button type="button" class="btn" id="t-verify" aria-pressed="true"><span>對抗性驗證每個發現</span><span class="st" aria-hidden="true">開</span></button>
+        <button type="button" class="btn" id="t-style" aria-pressed="false"><span>把純風格偏好列為必修</span><span class="st" aria-hidden="true">關</span></button>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="run" type="button">執行審查</button>
+        <button class="btn" id="reset" type="button">還原預設</button>
+      </div>
+      <p class="disclaimer">這是教學用的模擬：發現與驗證結果是依 diff 內預先設計的問題決定，不是真的在跑 AI 或編譯器；用來示範「審查流程與報告長什麼樣」。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header>
+      <h2>審查結果</h2>
+      <div class="seg-ctl" role="group" aria-label="切換顯示">
+        <button type="button" data-view="find" aria-pressed="true">發現</button>
+        <button type="button" data-view="json" aria-pressed="false">JSON 報告</button>
+        <button type="button" data-view="skill" aria-pressed="false">SKILL.md 預覽</button>
+      </div>
+    </header>
+    <div class="body">
+      <div class="steps" id="steps"></div>
+      <div id="out"></div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li>Review skill 要寫清楚四件事：<strong>看什麼</strong>（維度）、<strong>怎麼看</strong>（步驟）、<strong>怎麼確認</strong>（驗證）、<strong>怎麼回報</strong>（格式）。</li>
+      <li>每個發現都要有<strong>失敗情境</strong>：什麼輸入、什麼條件下會壞；寫不出情境的，多半只是意見。</li>
+      <li><strong>對抗性驗證</strong>讓第二輪去反駁自己的發現，刪掉誤報；關掉它，報告就被雜訊淹沒，開發者反而不信任整份報告。</li>
+      <li>要在 skill 裡寫明<strong>什麼不算問題</strong>（純風格、前置檢查已保證非 null、專案已允許的寫法），並且預設只審查、不修改。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="workitems.html"><span>← 上一題</span><b>需求拆解</b></a><a class="pg next" href="testing.html"><span>下一題 →</span><b>測試有效性</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { esc, jsonHTML, $, $$ } = Lab;
+
+// ---- the diff under review: [kind, text, tag]  kind: h file header, @ hunk (text, start), ' ' context, + add, - delete
+const DIFF = [
+  ['h', 'Controllers/OrderController.cs'],
+  ['@', '@@ -12,6 +12,26 @@ public class OrderController : ControllerBase', null, 12],
+  [' ', '    private readonly OrderService _svc;'],
+  [' ', '    [Authorize(Roles = "Staff")]'],
+  [' ', '    [HttpGet("{id}")]'],
+  ['-', '    public IActionResult Get(int id) => Ok(_svc.Get(id));'],
+  ['+', '    public async Task<IActionResult> Get(int id) => Ok(await _svc.GetAsync(id));'],
+  ['+', ''],
+  ['+', '    [HttpGet("search")]', 'search'],
+  ['+', '    public IActionResult Search(string customer)'],
+  ['+', '    {'],
+  ['+', '        var sql = "SELECT * FROM Orders WHERE Customer = \'" + customer + "\'";', 'sqli'],
+  ['+', '        return Ok(_svc.RunRaw(sql));', 'layer'],
+  ['+', '    }'],
+  ['+', ''],
+  ['+', '    [HttpDelete("{id}")]'],
+  ['+', '    public async Task<IActionResult> Delete(int id)', 'auth'],
+  ['+', '    {'],
+  ['+', '        await _svc.DeleteAsync(id);'],
+  ['+', '        return NoContent();'],
+  ['+', '    }'],
+  ['h', 'Services/OrderService.cs'],
+  ['@', '@@ -30,4 +30,32 @@ public class OrderService', null, 30],
+  ['+', '    public async Task<OrderDto> GetAsync(int id)'],
+  ['+', '    {'],
+  ['+', '        var order = _db.Orders.FirstOrDefault(o => o.Id == id);'],
+  ['+', '        return new OrderDto(order.Id, order.Total);', 'nullchk'],
+  ['+', '    }'],
+  ['+', ''],
+  ['+', '    public async Task<List<OrderDto>> ListByCustomerAsync(int customerId)'],
+  ['+', '    {'],
+  ['+', '        var orders = await _db.Orders.Where(o => o.CustomerId == customerId).ToListAsync();'],
+  ['+', '        var result = new List<OrderDto>();'],
+  ['+', '        foreach (var o in orders)', 'naming'],
+  ['+', '        {'],
+  ['+', '            var items = await _db.OrderItems.Where(i => i.OrderId == o.Id).ToListAsync();', 'n1'],
+  ['+', '            result.Add(new OrderDto(o.Id, items.Sum(i => i.Price)));'],
+  ['+', '        }'],
+  ['+', '        return result;'],
+  ['+', '    }'],
+  ['+', ''],
+  ['+', '    public async Task ShipAsync(int id)'],
+  ['+', '    {'],
+  ['+', '        var order = await _db.Orders.FindAsync(id);'],
+  ['+', '        if (order is null) throw new KeyNotFoundException();'],
+  ['+', '        try { await _mail.SendAsync(order.Email, "已出貨"); order.Status = "Shipped"; await _db.SaveChangesAsync(); }'],
+  ['+', '        catch (Exception) { }', 'swallow'],
+  ['+', '        _log.LogInformation("Shipped {Id}", order.Id);', 'maybenull'],
+  ['+', '    }']
+];
+
+// resolve line numbers / files once
+const LINES = (() => {
+  let file = '', cur = 0;
+  return DIFF.map(([k, t, tag, start], i) => {
+    if (k === 'h') { file = t; return { i, k, t, tag, file }; }
+    if (k === '@') { cur = start; return { i, k, t, tag, file }; }
+    const ln = k === '-' ? null : cur++;
+    return { i, k, t, tag, file, ln };
+  });
+})();
+const byTag = tag => LINES.find(l => l.tag === tag);
+const adds = LINES.filter(l => l.k === '+').length, dels = LINES.filter(l => l.k === '-').length;
+
+const DIMS = [
+  ['correct', '正確性', '邏輯、邊界、null 與例外路徑是否做對'],
+  ['security', '安全性', '注入、授權、敏感資料外洩'],
+  ['perf', '效能', 'N+1、不必要的往返與配置'],
+  ['read', '可讀性', '命名與結構是否讓人看得懂'],
+  ['arch', '架構一致性', '是否符合專案分層與慣例'],
+  ['test', '測試', '新行為有沒有對應的有效測試'],
+  ['compat', '相容性', 'API 契約、資料庫 schema、舊版呼叫端'],
+  ['err', '錯誤處理與記錄', '例外是否被吞掉、log 是否足以追查']
+];
+const DIM_NAME = Object.fromEntries(DIMS.map(d => [d[0], d[1]]));
+
+// kind: real | decoy | style (decoy that is pure style) ; sev: must/should/nit
+const FINDINGS = [
+  { id: 'f1', tag: 'sqli', dim: 'security', sev: 'must', kind: 'real', title: 'SQL 以字串串接組成，有 SQL Injection',
+    fail: '呼叫 /search?customer=\' OR 1=1 -- 會回傳整張 Orders；若換成 \'; DROP TABLE Orders;-- 在允許多重語句的連線上會直接刪表。',
+    fix: '改用參數化：_db.Orders.Where(o => o.Customer == customer)，或 FromSqlInterpolated($"... {customer}")。' },
+  { id: 'f2', tag: 'auth', dim: 'security', sev: 'must', kind: 'real', title: '刪除端點缺少授權（沒有 [Authorize]）',
+    fail: '同 Controller 的 Get 有 [Authorize(Roles = "Staff")]，這個 Delete 沒有；任何未登入者呼叫 DELETE /api/order/42 都能刪單。',
+    fix: '在 Delete 加上 [Authorize(Roles = "Admin")]，並補一個「未登入應回 401」的整合測試。' },
+  { id: 'f3', tag: 'nullchk', dim: 'correct', sev: 'must', kind: 'real', title: 'FirstOrDefault 可能回傳 null，直接取 order.Id',
+    fail: '查詢不存在的 id（例如 /api/order/9999）時 order 為 null，丟出 NullReferenceException，API 回 500 而不是 404。',
+    fix: '先判斷 if (order is null) throw new KeyNotFoundException()，由全域 filter 轉成 404；或改用 FirstAsync 並明確處理。' },
+  { id: 'f4', tag: 'swallow', dim: 'err', sev: 'must', kind: 'real', title: 'catch 吞掉例外，寄信失敗卻被當成功',
+    fail: 'SMTP 逾時時例外被丟掉，order.Status 沒更新、也沒有任何 log，客服只看到「已出貨」的 log 卻沒有任何信件。',
+    fix: '至少 _log.LogError(ex, "寄出貨通知失敗 {Id}", id) 並重新丟出；若要容錯，改為寫入重試佇列。' },
+  { id: 'f5', tag: 'n1', dim: 'perf', sev: 'should', kind: 'real', title: 'foreach 內逐筆查詢 OrderItems（N+1）',
+    fail: '某客戶有 500 張訂單時會發出 501 次 SQL；高峰期連線池被占滿，API 延遲從 80ms 變成數秒。',
+    fix: '一次 Include(o => o.Items) 並 Select 投影成 DTO，或用 GroupBy 先把 OrderItems 一次查回。' },
+  { id: 'f6', tag: 'layer', dim: 'arch', sev: 'should', kind: 'real', title: 'Controller 自己組 SQL 並呼叫 RunRaw，繞過 Service 層',
+    fail: '專案規範是 Controller 只呼叫 Service 的具名方法；把 SQL 寫在 Controller，之後換資料庫或加租戶過濾時要改多處。',
+    fix: '在 OrderService 新增 SearchByCustomerAsync(string customer)，Controller 只負責轉呼叫。' },
+  { id: 'f7', tag: 'search', dim: 'test', sev: 'nit', kind: 'real', title: '新增的 Search／Delete 沒有對應測試',
+    fail: 'CI 的 12 個測試全綠，但沒有任何一個走到新端點；上面的授權與注入問題在 CI 完全看不出來。',
+    fix: '補：Delete 未登入回 401、Search 帶單引號輸入不會多回資料。' },
+  { id: 'd1', tag: 'naming', dim: 'read', sev: 'nit', kind: 'style', title: 'foreach 迴圈變數 o 太短，建議改成 order',
+    fail: '（無）只是命名偏好，不會造成任何錯誤。',
+    fix: '改名為 order。',
+    reason: '迴圈範圍只有 3 行，專案 .editorconfig 與同檔其他 lambda 都使用單字母；沒有失敗情境，屬純風格偏好，不列入。' },
+  { id: 'd2', tag: 'maybenull', dim: 'correct', sev: 'should', kind: 'decoy', title: 'order 可能為 null，LogInformation 取 order.Id 會 NRE',
+    fail: '若 order 為 null，下一行會丟 NullReferenceException。',
+    fix: '加上 order?.Id。',
+    reason: '前兩行已有 if (order is null) throw，執行到這裡 order 保證非 null；追蹤控制流後確認不可能發生。' }
+];
+const SEV = { must: ['必須修', 'bad'], should: ['建議修', 'warn'], nit: ['小問題', ''] };
+const SEV_ORDER = { must: 0, should: 1, nit: 2 };
+
+const DEFAULT = { dims: DIMS.map(d => d[0]), verify: true, style: false };
+const state = { dims: new Set(DEFAULT.dims), verify: true, style: false, view: 'find', sel: null, running: false, step: 6 };
+
+// ---- compute the report from the current settings
+function compute() {
+  const shown = FINDINGS.filter(f => state.dims.has(f.dim));
+  const skippedDims = FINDINGS.length - shown.length;
+  const items = shown.map(f => {
+    const l = byTag(f.tag);
+    let sev = f.sev, excluded = false;
+    if (f.kind === 'style' && state.style) sev = 'must';
+    if (state.verify) {
+      if (f.kind === 'decoy') excluded = true;
+      if (f.kind === 'style' && !state.style) excluded = true;
+    }
+    return { ...f, sev, excluded, file: l.file.split('/').pop(), line: l.ln, noise: !excluded && f.kind !== 'real' };
+  }).sort((a, b) => (a.excluded - b.excluded) || (SEV_ORDER[a.sev] - SEV_ORDER[b.sev]) || (a.line - b.line));
+  const kept = items.filter(x => !x.excluded);
+  return {
+    items, kept, excl: items.filter(x => x.excluded), skippedDims,
+    noise: kept.filter(x => x.noise).length,
+    cnt: { must: kept.filter(x => x.sev === 'must').length, should: kept.filter(x => x.sev === 'should').length, nit: kept.filter(x => x.sev === 'nit').length }
+  };
+}
+
+// ---- diff
+function renderDiff() {
+  const sel = state.sel ? byTag(FINDINGS.find(f => f.id === state.sel).tag).i : -1;
+  $('#diff').innerHTML = LINES.map(l => {
+    if (l.k === 'h') return `<span class="dl file" data-i="${l.i}"><span class="gn">▸</span>${esc(l.t)}</span>`;
+    if (l.k === '@') return `<span class="dl hunk" data-i="${l.i}"><span class="gn"></span>${esc(l.t)}</span>`;
+    const cls = l.k === '+' ? 'add' : l.k === '-' ? 'del' : '';
+    return `<span class="dl ${cls}${l.i === sel ? ' sel' : ''}" data-i="${l.i}"><span class="gn">${l.ln == null ? '' : l.ln}</span>${esc(l.k)}${esc(l.t)}</span>`;
+  }).join('');
+  $('#diff-stat').textContent = `2 個檔案　+${adds}／−${dels}`;
+  const el = $('#diff .sel');
+  if (el) $('#diff').scrollTop = Math.max(0, el.offsetTop - $('#diff').clientHeight / 2);
+}
+
+// ---- steps
+function stepDefs(r) {
+  const dims = [...state.dims].map(k => DIM_NAME[k]);
+  return [
+    ['取得 diff', `git diff main...HEAD：2 個檔案，+${adds}／−${dels}`],
+    ['讀周邊程式碼', '讀 OrderService 全檔、DbContext、其他 Controller 的 [Authorize] 用法'],
+    ['跑 build／lint／test', 'dotnet build 成功；analyzer 警告 1；xunit 12／12 通過（沒有一個測試走到新端點）'],
+    ['逐維度審查', dims.length ? `${dims.length} 個維度：${dims.join('、')}` : '沒有勾選任何維度'],
+    ['驗證發現', state.verify ? `對 ${r.items.length} 個發現逐一嘗試反駁：追控制流、查專案規範；排除 ${r.excl.length} 個` : '已略過：所有發現原封不動進報告'],
+    ['輸出報告', `必須修 ${r.cnt.must}、建議修 ${r.cnt.should}、小問題 ${r.cnt.nit}；預設只審查、不修改任何檔案`]
+  ];
+}
+function renderSteps(r) {
+  $('#steps').innerHTML = stepDefs(r).map(([n, d], i) => {
+    const cls = state.running ? (i < state.step ? 'done' : i === state.step ? 'active' : '') : 'done';
+    return `<div class="step ${cls}"><div><b>${esc(n)}</b><span class="d">${esc(d)}</span></div></div>`;
+  }).join('');
+}
+
+// ---- findings / json / skill
+function findingsHTML(r) {
+  const stats = `<div class="stats">
+    <div class="stat"><div class="v">${r.cnt.must}</div><div class="l">必須修</div></div>
+    <div class="stat"><div class="v">${r.cnt.should}</div><div class="l">建議修</div></div>
+    <div class="stat"><div class="v">${r.cnt.nit}</div><div class="l">小問題</div></div>
+    <div class="stat"><div class="v">${r.excl.length}</div><div class="l">驗證後排除</div></div></div>`;
+  let note;
+  if (r.noise) note = `<div class="note warn">沒有驗證：報告裡混進 <strong>${r.noise}</strong> 個誤報（${r.noise}／${r.kept.length}，虛線框）。開發者得自己判斷哪些是真的，久了就不看報告了。</div>`;
+  else if (r.excl.length) note = `<div class="note ok">對抗性驗證排除了 <strong>${r.excl.length}</strong> 個誤報，留下來的每一項都有失敗情境。</div>`;
+  else note = `<div class="note">目前報告裡沒有誤報。</div>`;
+  const cards = r.items.map(f => {
+    const [sl, sc] = SEV[f.sev];
+    const sel = state.sel === f.id;
+    return `<article class="fd${f.excluded ? ' excl' : ''}${f.noise ? ' noise' : ''}${sel ? ' sel' : ''}">
+      <button type="button" class="fd-h" data-id="${f.id}" aria-pressed="${sel}">
+        <div class="meta"><span class="chip ${sc}">${f.excluded ? '已排除' : sl}</span><span class="loc">${esc(f.file)}:${f.line}</span><span>${esc(DIM_NAME[f.dim])}</span></div>
+        <div class="ttl">${esc(f.title)}</div>
+      </button>
+      <div class="det">
+        ${f.excluded ? `<div class="why">驗證後排除：${esc(f.reason)}</div>` : ''}
+        <div><b>失敗情境：</b>${esc(f.fail)}</div>
+        <div><b>建議修法：</b>${esc(f.fix)}</div>
+      </div></article>`;
+  }).join('');
+  const skipped = r.skippedDims ? `<p class="small muted">另有 ${r.skippedDims} 個發現屬於未勾選的維度，沒有出現在報告裡。</p>` : '';
+  return stats + note + `<div>${cards || '<div class="note">請至少勾選一個審查維度。</div>'}</div>` + skipped;
+}
+
+function reportObj(r) {
+  return {
+    skill: 'code-review',
+    mode: 'read-only',
+    target: 'git diff main...HEAD',
+    adversarial_verification: state.verify,
+    dimensions: [...state.dims].map(k => DIM_NAME[k]),
+    build: { build: 'pass', analyzer_warnings: 1, tests: '12/12 pass' },
+    summary: { must_fix: r.cnt.must, should_fix: r.cnt.should, nit: r.cnt.nit, excluded: r.excl.length },
+    findings: r.kept.map(f => ({ file: f.file, line: f.line, severity: SEV[f.sev][0], dimension: DIM_NAME[f.dim], issue: f.title, failure_scenario: f.fail, suggested_fix: f.fix })),
+    excluded: r.excl.map(f => ({ file: f.file, line: f.line, issue: f.title, reason: f.reason }))
+  };
+}
+
+function skillText() {
+  const dims = DIMS.filter(d => state.dims.has(d[0])).map(d => `- ${d[1]}：${d[2]}`).join('\n') || '- （尚未選擇任何維度）';
+  const verify = state.verify
+    ? '5. 對抗性驗證：把每個發現當成「可能是誤報」，主動找反證（追控制流、查專案規範、必要時寫測試重現）。反駁成功就移到「已排除」並寫明原因。'
+    : '5. （未啟用驗證）發現直接輸出。';
+  const style = state.style
+    ? '- 【例外】純風格偏好（命名、空行）一律列為「必須修」。'
+    : '- 純風格偏好（命名、空行、括號位置）：交給 formatter／analyzer，不列入報告。';
+  return `---
+name: code-review
+description: 審查目前分支相對 main 的 diff，找出會造成錯誤、資安或效能問題的缺陷。用於「幫我 review」「合併前檢查」。預設只審查、不修改檔案。
+---
+
+# 檢查維度
+${dims}
+
+# 執行步驟
+1. 以 git diff main...HEAD 取得變更範圍。
+2. 讀變更檔案的周邊程式碼：呼叫端、被呼叫端、同類 Controller 的慣例。
+3. 跑 dotnet build、dotnet format --verify-no-changes、dotnet test，記錄結果。
+4. 逐維度審查；每個發現都要寫出「檔案:行號、嚴重程度、失敗情境、建議修法」。
+${verify}
+6. 依「輸出格式」回報。
+
+# 什麼不算問題
+- 已由前置檢查保證非 null 的值，不要報「可能為 null」。
+- 專案 .editorconfig 已允許的寫法。
+${style}
+- 寫不出失敗情境的意見，不得當成發現輸出。
+
+# 輸出格式
+JSON：summary（各嚴重程度計數）、findings[]（file, line, severity, dimension, issue, failure_scenario, suggested_fix）、excluded[]（含排除原因）。
+嚴重程度只有：必須修／建議修／小問題。
+
+# 安全邊界
+- 預設只審查、不修改：不 Edit、不 commit、不 push。
+- 使用者明確要求「順便修」才動手，且一次只改一個發現。
+`;
+}
+function skillHTML() {
+  const tips = [];
+  if (!state.verify) tips.push('<div class="note warn">缺少「對抗性驗證」這一步：誤報不會被刪掉，會直接進報告。</div>');
+  if (state.style) tips.push('<div class="note warn">「純風格偏好列為必修」會讓報告充滿雜訊，真正的安全問題被淹沒；風格應交給 formatter。</div>');
+  if (!tips.length) tips.push('<div class="note ok">這份 SKILL.md 有「驗證」與「什麼不算問題」，誤報有被擋下來。</div>');
+  return `<div class="hint-list">${tips.join('')}<pre class="code" id="skill" tabindex="0">${esc(skillText())}</pre></div>`;
+}
+
+function renderOut(r) {
+  const out = $('#out');
+  if (state.running) { out.innerHTML = '<div class="note">審查進行中…</div>'; return; }
+  if (state.view === 'find') out.innerHTML = findingsHTML(r);
+  else if (state.view === 'json') out.innerHTML = `<pre class="code" tabindex="0">${jsonHTML(reportObj(r), { clip: 90 })}</pre>`;
+  else out.innerHTML = skillHTML();
+}
+
+function render() {
+  const r = compute();
+  renderSteps(r);
+  renderOut(r);
+  $$('[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === state.view));
+  [['verify', '#t-verify'], ['style', '#t-style']].forEach(([k, s]) => {
+    const b = $(s); b.setAttribute('aria-pressed', state[k]); $('.st', b).textContent = state[k] ? '開' : '關';
+  });
+  $$('#dims input').forEach(i => { i.checked = state.dims.has(i.value); });
+  $('#run').disabled = state.running;
+}
+
+// ---- events
+$('#dims').innerHTML = DIMS.map(d => `<label class="check"><input type="checkbox" value="${d[0]}" checked> <span>${esc(d[1])}</span></label>`).join('');
+$('#dims').addEventListener('change', e => {
+  if (e.target.checked) state.dims.add(e.target.value); else state.dims.delete(e.target.value);
+  render();
+});
+$('#t-verify').addEventListener('click', () => { state.verify = !state.verify; render(); });
+$('#t-style').addEventListener('click', () => { state.style = !state.style; render(); });
+$$('[data-view]').forEach(b => b.addEventListener('click', () => { state.view = b.dataset.view; render(); }));
+$('#out').addEventListener('click', e => {
+  const b = e.target.closest('.fd-h');
+  if (!b) return;
+  state.sel = state.sel === b.dataset.id ? null : b.dataset.id;
+  renderDiff(); render();
+});
+$('#reset').addEventListener('click', () => {
+  state.dims = new Set(DEFAULT.dims); state.verify = DEFAULT.verify; state.style = DEFAULT.style;
+  state.sel = null; state.view = 'find'; state.running = false; state.step = 6;
+  renderDiff(); render();
+});
+let timer = null;
+$('#run').addEventListener('click', () => {
+  if (state.running) return;
+  state.running = true; state.step = 0; state.view = 'find';
+  render();
+  clearInterval(timer);
+  timer = setInterval(() => {
+    state.step++;
+    if (state.step >= 6) { clearInterval(timer); state.running = false; state.step = 6; }
+    render();
+  }, 650);
+});
+
+renderDiff();
+render();
+</script>
+</body>
+</html>

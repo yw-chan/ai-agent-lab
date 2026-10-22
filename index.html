@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agent 實驗室</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+.hero { padding-block: 36px 20px; display: grid; gap: 10px; }
+.hero h1 { font-family: var(--f-display); font-size: 2.4rem; line-height: 1.2; margin: 0; }
+.hero p { margin: 0; color: var(--muted); max-width: 68ch; }
+.flowline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 12.5px; color: var(--muted); }
+.flowline span { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+.flowline span.in { border-color: var(--seg-user); color: var(--ink); }
+.flowline span.out { border-color: var(--seg-output); color: var(--ink); }
+.mod { display: grid; gap: 10px; padding-block: 14px; }
+.mod > h2 { font-family: var(--f-display); font-size: 1.25rem; margin: 0; color: var(--accent); }
+.mod > p { margin: 0; color: var(--muted); font-size: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.card { display: grid; grid-template-rows: auto auto 1fr; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; text-decoration: none; color: var(--ink); min-width: 0; }
+.card:hover { border-color: var(--accent); }
+.card h3 { margin: 0; font-size: 1.05rem; }
+.card p { margin: 0; color: var(--muted); font-size: 13.5px; }
+.card .qref span { font-size: 11px; }
+.qa { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; background: var(--accent-soft); border-radius: 12px; padding: 16px 18px; text-decoration: none; color: var(--ink); }
+.qa h2 { margin: 0; font-family: var(--f-display); font-size: 1.25rem; }
+.qa p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.qa .go { font-family: var(--f-mono); color: var(--accent); white-space: nowrap; }
+.foot { padding-block: 16px 48px; }
+@media (max-width: 520px) { .hero h1 { font-size: 1.9rem; } .qa { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<header class="wrap hero">
+  <h1>Agent 實驗室</h1>
+  <p>每一頁都是同一種玩法：左邊改你要送出的內容，右邊看到真正送給模型的 request、模型回傳的 response，還有 token、費用、上下文裡到底裝了什麼。題號對應課程版 11 題和面試版 16 題。</p>
+  <div class="flowline" aria-label="一次呼叫的流程">
+    <span class="in">你的輸入</span>→<span>Agent 組 request</span>→<span>遠端模型</span>→<span>tool_use</span>→<span>本機執行</span>→<span>tool_result</span>→<span class="out">回答</span>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="mod">
+    <h2>模型基礎</h2>
+    <p>一次 API 呼叫裡發生了什麼：送了哪些 token、花多少錢、哪些可以重用。</p>
+    <div class="grid">
+      <a class="card" href="tokens.html"><div class="qref"><span>課程 1</span><span>面試 1</span></div><h3>Token 組成</h3><p>調整 system、工具、歷史、附件、思考，看 request JSON 和每一塊佔多少 token；連續送出看每輪越來越貴。</p></a>
+      <a class="card" href="effort.html"><div class="qref"><span>課程 2</span><span>面試 2</span></div><h3>Reasoning Effort</h3><p>換任務難度和推理強度，比較思考 token、延遲、費用和答對機率，看什麼時候值得調高。</p></a>
+      <a class="card" href="cache.html"><div class="qref"><span>課程 3</span><span>面試 3</span></div><h3>Prompt Cache</h3><p>連續送出請求，看前綴從哪裡開始對不上、快取為什麼失效，以及 usage 裡的讀取和寫入。</p></a>
+      <a class="card" href="context.html"><div class="qref"><span>課程 4</span><span>面試 4、5</span></div><h3>Context Window</h3><p>往上下文裡塞東西，看 1M 視窗怎麼被填滿、每輪費用和品質怎麼變、壓縮時什麼會不見。</p></a>
+    </div>
+  </section>
+
+  <section class="mod">
+    <h2>Agent 機制</h2>
+    <p>Agent 怎麼用工具、怎麼記事情、怎麼分工。</p>
+    <div class="grid">
+      <a class="card" href="tools.html"><div class="qref"><span>課程 5</span><span>面試 6</span></div><h3>Tool、MCP、Skill</h3><p>一步一步看遠端模型怎麼「要求」呼叫工具、你電腦上的 Agent 怎麼執行，MCP 和 Skill 什麼時候載入。</p></a>
+      <a class="card" href="memory.html"><div class="qref"><span>課程 6</span><span>面試 7、8</span></div><h3>長任務記憶</h3><p>把規則放在聊天、CLAUDE.md、rules 或 hook，跑一段長任務再壓縮，看哪些規則還在；Claude Code 的記憶從哪裡來。</p></a>
+      <a class="card" href="subagent.html"><div class="qref"><span>課程 7</span><span>面試 9</span></div><h3>Subagent</h3><p>主對話自己做和派子代理比一比：上下文、費用、時間，交辦內容少寫一項會出什麼問題。</p></a>
+      <a class="card" href="routing.html"><div class="qref"><span>課程 8</span><span>面試 10</span></div><h3>模型路由</h3><p>替長任務的每個階段選模型，比較頂規一路到底、全部小型和分工，加上連錯兩次升級的規則。</p></a>
+    </div>
+  </section>
+
+  <section class="mod">
+    <h2>工程實踐</h2>
+    <p>把 AI 放進開發流程：拆任務、審程式、驗測試、提交。</p>
+    <div class="grid">
+      <a class="card" href="workitems.html"><div class="qref"><span>課程 9</span><span>面試 11</span></div><h3>需求拆解</h3><p>輸入一個業務需求，看垂直切片和水平分層的差別，以及每個工作項目的交辦 prompt。</p></a>
+      <a class="card" href="review.html"><div class="qref"><span>課程 10</span><span>面試 12</span></div><h3>Code Review Skill</h3><p>對一段有問題的 C# diff 執行審查，選檢查維度、開關對抗性驗證，看報告和 SKILL.md 長什麼樣。</p></a>
+      <a class="card" href="testing.html"><div class="qref"><span>課程 11</span><span>面試 13</span></div><h3>測試有效性</h3><p>覆蓋率很高但變異測試分數很低：找出沒斷言、假陽性、flaky 和過度耦合的測試。</p></a>
+      <a class="card" href="habits.html"><div class="qref"><span>面試 14、15、16</span></div><h3>開發習慣</h3><p>commit 產生器和檢查，加上一套固定的開發流程，每一步對應 Claude Code 的做法。</p></a>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <p class="disclaimer">所有 token、費用、延遲都是教學用的估算，不是真實的 tokenizer 或價目表；API 欄位以官方文件為準。</p>
+</footer>
+
+</body>
+</html>

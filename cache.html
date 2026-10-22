@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Prompt Cache 實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .seg-ctl.wrap-seg { display: flex; flex-wrap: wrap; }
+  .seg-ctl.wrap-seg button { flex: 1 1 auto; }
+  .tool-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .blocks { display: grid; gap: 4px; }
+  .grp { font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 6px; letter-spacing: .02em; }
+  .blk { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; padding: 6px 10px; border-radius: 6px; border-left: 4px solid var(--line); background: var(--surface-2); font-size: 13px; }
+  .blk .nm { font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
+  .blk .tk { font-family: var(--f-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .blk .tx { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+  .blk.match { background: var(--ok-soft); border-left-color: var(--ok); }
+  .blk.match .tx { color: var(--ok); }
+  .blk.break, .blk.expired { background: var(--warn-soft); border-left-color: var(--warn); }
+  .blk.break .tx, .blk.expired .tx { color: var(--warn); font-weight: 500; }
+  .blk.dead { border-left-color: var(--line); color: var(--muted); }
+  .blk.dead .nm { text-decoration: line-through; text-decoration-color: var(--line); }
+  .blk.new { background: transparent; border: 1px dashed var(--accent); border-left: 4px solid var(--accent); }
+  .blk.new .tx { color: var(--accent); }
+  .blk.after, .blk.short { background: transparent; border: 1px dashed var(--line); border-left: 4px dashed var(--line); color: var(--muted); }
+  .bp { font-family: var(--f-mono); font-size: 12px; color: var(--accent); padding: 2px 10px; border-top: 2px solid var(--accent); }
+  .key { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--muted); }
+  .key span { display: inline-flex; align-items: center; gap: 6px; }
+  .key i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid var(--line); }
+  .key .k-match { background: var(--ok-soft); border-color: var(--ok); }
+  .key .k-break { background: var(--warn-soft); border-color: var(--warn); }
+  .key .k-dead { background: var(--surface-2); }
+  .key .k-new { border: 1px dashed var(--accent); }
+  .tbl td.reason { min-width: 220px; }
+  .tbl tr.last td { background: var(--accent-soft); }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 3</span><span>面試 3</span></div>
+  <h1>Prompt Cache 實驗</h1>
+  <p class="lede">左邊調整「下一次請求」，右邊逐塊比對它和快取裡存的前綴：從頭開始一路相同才能重用，第一個不同的地方就是快取斷掉的位置，後面全部作廢。頁面已經先送過一次請求，你送出第二次就能看到命中或失效的原因。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>下一次請求</h2><span class="hint">修改後右邊即時預覽</span></header>
+    <div class="body">
+      <div class="field">
+        <label for="system">System prompt（指示）</label>
+        <textarea id="system" rows="3"></textarea>
+      </div>
+      <label class="check"><input type="checkbox" id="doc" checked> <span>附上長篇參考文件（客服規章，約 2,000 tokens，固定不變）</span></label>
+      <label class="check"><input type="checkbox" id="time"> <span>在 system 最前面加上「現在時間」<br><span class="sub">每次請求的時間（含秒）都不同，這是很常見的錯誤寫法。</span></span></label>
+
+      <div class="field">
+        <span class="label" id="tools-label">工具（中途增減會怎樣？）</span>
+        <div class="tool-row" id="tools" role="group" aria-labelledby="tools-label"></div>
+      </div>
+
+      <div class="field">
+        <label for="model">模型</label>
+        <select id="model">
+          <option value="claude-sonnet-x">claude-sonnet-x（單價 ×1）</option>
+          <option value="claude-haiku-x">claude-haiku-x（單價約 ×0.33，示意）</option>
+        </select>
+        <span class="sub">快取按模型分開，換模型就用不到上次的快取。</span>
+      </div>
+
+      <div class="field">
+        <label for="gap">距離上一次請求：<b id="gap-v">3</b> 分鐘</label>
+        <input type="range" id="gap" min="0" max="90" value="3">
+      </div>
+
+      <div class="field">
+        <span class="label" id="ttl-label">快取存活時間（TTL）</span>
+        <div class="seg-ctl" id="ttl" role="group" aria-labelledby="ttl-label">
+          <button type="button" data-ttl="5" aria-pressed="true">5 分鐘</button>
+          <button type="button" data-ttl="60" aria-pressed="false">1 小時</button>
+        </div>
+        <span class="sub">TTL 是寫入快取時決定的；之後每次命中都會重新計時。</span>
+      </div>
+
+      <div class="field">
+        <span class="label" id="bp-label">cache_control 斷點位置</span>
+        <div class="seg-ctl wrap-seg" id="bp" role="group" aria-labelledby="bp-label">
+          <button type="button" data-bp="tools" aria-pressed="false">工具之後</button>
+          <button type="button" data-bp="system" aria-pressed="false">system 之後</button>
+          <button type="button" data-bp="msg" aria-pressed="true">最後一則訊息之後</button>
+        </div>
+        <span class="sub">斷點之前（含）的整段前綴會被快取，前綴至少要 1,024 tokens 才會快取。</span>
+      </div>
+
+      <div class="field">
+        <label for="msg">這一次的使用者訊息</label>
+        <textarea id="msg" rows="2"></textarea>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="send" type="button">送出</button>
+        <button class="btn" id="reset" type="button">重新開始</button>
+      </div>
+      <p class="disclaimer">所有數字都是示意估算：token 依字數粗估，價格用示意單價（輸入 $3、輸出 $15、快取寫入 1.25 倍＝$3.75、快取讀取 0.1 倍＝$0.30，每百萬 token；1 小時 TTL 的寫入示意為 2 倍＝$6）。實際欄位與計價請以官方文件為準。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>前綴比對與實際送出</h2><span class="hint" id="hint-clock"></span></header>
+    <div class="body">
+      <div>
+        <div class="small muted" style="margin-bottom:6px">快取目前存的前綴</div>
+        <div id="entries" class="row"></div>
+      </div>
+
+      <div>
+        <div class="key" aria-label="圖例">
+          <span><i class="k-match"></i>相同、可重用</span>
+          <span><i class="k-break"></i>第一個不同處（快取在此斷掉）</span>
+          <span><i class="k-dead"></i>斷點之後（內容一樣也不能重用）</span>
+          <span><i class="k-new"></i>新內容／未快取</span>
+        </div>
+        <div class="blocks" id="blocks" style="margin-top:8px"></div>
+      </div>
+
+      <div id="verdict" class="note"></div>
+
+      <div>
+        <div class="small muted" style="margin-bottom:6px">這次請求的輸入 token 分佈</div>
+        <div id="bar"></div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="v" id="s-cost">$0</div><div class="l">這次費用（有快取）</div></div>
+        <div class="stat"><div class="v" id="s-no">$0</div><div class="l">同樣請求不用快取</div></div>
+        <div class="stat"><div class="v" id="s-save">0%</div><div class="l">差距（負數＝省）</div></div>
+      </div>
+
+      <div class="row" style="justify-content:space-between">
+        <span class="small muted" id="json-title"></span>
+        <div class="seg-ctl" role="group" aria-label="切換顯示">
+          <button type="button" data-view="req" aria-pressed="true">Request</button>
+          <button type="button" data-view="res" aria-pressed="false">Response usage</button>
+        </div>
+      </div>
+      <pre class="code" id="json" tabindex="0"></pre>
+
+      <div>
+        <div class="small muted" style="margin-bottom:6px">已送出的請求</div>
+        <div class="tbl" id="history"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li><strong>穩定的放前面、會變的放後面。</strong>快取比的是前綴：順序是 tools → system → messages，只要前面有一個字不同，後面全部作廢。</li>
+      <li><strong>不要在 system 放時間戳記。</strong>每次都不同，等於每次都在第一個區塊就斷掉；要給時間就放在最後一則訊息裡。</li>
+      <li><strong>對話中途不要增減工具。</strong>工具定義在最前面，多一個少一個，後面的 system 和歷史都連帶失效。</li>
+      <li><strong>命中會重新計時。</strong>只要在 TTL 內持續有請求，快取就一直活著；中斷超過 TTL 才會過期，需要重新付寫入的價錢。</li>
+      <li>快取讀取只要輸入價的約 0.1 倍，寫入約 1.25 倍：前綴要夠長（至少 1,024 tokens）、而且會被重複用，才划算。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="effort.html"><span>← 上一題</span><b>Reasoning Effort</b></a><a class="pg next" href="context.html"><span>下一題 →</span><b>Context Window</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { tokens, PRICE, fmt, usd, esc, jsonHTML, bar, $, $$ } = Lab;
+
+const MODEL_FACTOR = { 'claude-sonnet-x': 1, 'claude-haiku-x': 0.33 };
+const MIN_PREFIX = 1024;
+const BASE_MIN = 9 * 60; // simulated clock starts at 09:00
+
+const TOOLS = {
+  Read: { name: 'Read', description: 'Read a file from the local filesystem. Returns the file content with line numbers. Use offset and limit for large files.', input_schema: { type: 'object', properties: { file_path: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['file_path'] } },
+  Bash: { name: 'Bash', description: 'Run a shell command and return stdout and stderr. Use for git, build and test commands. Avoid interactive commands.', input_schema: { type: 'object', properties: { command: { type: 'string' }, timeout: { type: 'integer' } }, required: ['command'] } },
+  Edit: { name: 'Edit', description: 'Replace an exact string in a file. old_string must be unique in the file, otherwise the call fails.', input_schema: { type: 'object', properties: { file_path: { type: 'string' }, old_string: { type: 'string' }, new_string: { type: 'string' } }, required: ['file_path', 'old_string', 'new_string'] } },
+  Grep: { name: 'Grep', description: 'Search file contents with a regular expression. Supports glob filters and returns matching lines with line numbers.', input_schema: { type: 'object', properties: { pattern: { type: 'string' }, glob: { type: 'string' }, path: { type: 'string' } }, required: ['pattern'] } }
+};
+const TOOL_DESC = { Read: 'Read：讀取檔案', Bash: 'Bash：執行指令', Edit: 'Edit：修改檔案', Grep: 'Grep：搜尋內容' };
+
+const DEFAULT_SYSTEM = '你是電商平台的客服助理。回答要簡潔、使用繁體中文；規章裡沒有寫的事情不要猜，請引導使用者聯絡真人客服。';
+
+const DOC_TOPICS = [
+  ['退貨期限', '商品到貨後七日內可申請退貨，已拆封的食品、貼身衣物與客製化商品不適用，申請時需附訂單編號。'],
+  ['退款時效', '退貨商品回到倉庫並檢查無誤後，三到七個工作天退回原付款方式，信用卡依發卡銀行作業時間為準。'],
+  ['運費負擔', '商品瑕疵或寄錯由本公司負擔來回運費；因個人因素退貨，由消費者負擔退回的運費。'],
+  ['換貨流程', '同款商品有庫存時可直接換貨，無庫存時改為退款，客服會在一個工作天內以簡訊通知結果。'],
+  ['發票處理', '電子發票退貨時會同步作廢並重開折讓單，紙本發票需隨商品寄回，遺失者需另行簽署切結書。'],
+  ['缺貨通知', '訂單成立後若發現缺貨，系統會在二十四小時內通知，消費者可選擇等待補貨或取消訂單全額退款。'],
+  ['會員點數', '退貨時，因該筆訂單所獲得的點數會一併扣回，已使用的折抵點數則依原比例退回帳戶。'],
+  ['配送異常', '包裹超過預定到貨日三天仍未送達時，客服可協助向物流查詢，確認遺失後會重新出貨或退款。']
+];
+
+function docText() {
+  const lines = [];
+  for (let n = 1; n <= 30; n++) {
+    const t = DOC_TOPICS[(n - 1) % DOC_TOPICS.length];
+    lines.push('第 ' + n + ' 條【' + t[0] + '】' + t[1]);
+  }
+  return '以下是客服規章全文，回答時一律以此為準：\n' + lines.join('\n');
+}
+const DOC = docText();
+
+const QUESTIONS = ['請問退貨流程怎麼走？', '那退款多久會到帳？', '如果商品有瑕疵，運費誰出？', '可以改成換貨嗎？', '發票要怎麼處理？', '會員點數會被扣回嗎？'];
+const REPLIES = [
+  '依規章第 1 條，到貨七日內可申請退貨，請準備訂單編號，我可以帶你一步一步操作。',
+  '依規章第 2 條，商品回到倉庫檢查無誤後三到七個工作天退回原付款方式。',
+  '有瑕疵由我們負擔來回運費（第 3 條），個人因素退貨則由你負擔退回運費。',
+  '同款有庫存可以直接換貨（第 4 條），沒有庫存會改為退款，並於一個工作天內通知。',
+  '電子發票會同步作廢並重開折讓單；紙本發票需隨商品寄回（第 5 條）。',
+  '會，該筆訂單獲得的點數會一併扣回，已折抵的點數則依原比例退回（第 7 條）。'
+];
+
+const state = { entries: [], history: [], convo: [], clock: 0, qi: 0, view: 'req', ttl: 5, bp: 'msg', tools: { Read: true, Bash: true, Edit: true, Grep: false } };
+
+function ttlLabel(m) { return m >= 60 ? '1 小時' : m + ' 分鐘'; }
+function clockStr(absMin, sec) {
+  const m = BASE_MIN + absMin;
+  const p = x => String(x).padStart(2, '0');
+  return p(Math.floor(m / 60) % 24) + ':' + p(m % 60) + (sec == null ? '' : ':' + p(sec));
+}
+
+function readCtl() {
+  return {
+    system: $('#system').value,
+    doc: $('#doc').checked,
+    time: $('#time').checked,
+    tools: Object.keys(TOOLS).filter(k => state.tools[k]),
+    model: $('#model').value,
+    gap: +$('#gap').value,
+    ttl: state.ttl,
+    bp: state.bp,
+    msg: $('#msg').value
+  };
+}
+
+function buildBlocks(s, now) {
+  const blocks = [];
+  s.tools.forEach((n, i) => {
+    const t = TOOLS[n];
+    const js = JSON.stringify(t);
+    blocks.push({ kind: 'tool', type: 'tool', label: 'tools[' + i + '] ' + n, key: 'T|' + js, tok: tokens(js) + (i === 0 ? 40 : 0) });
+  });
+  const toolEnd = blocks.length - 1;
+  const sys = [];
+  if (s.time) {
+    const text = '現在時間：2026-10-22 ' + clockStr(now, (state.history.length * 23 + 11) % 60);
+    sys.push({ type: 'time', text, label: 'time' });
+  }
+  sys.push({ type: 'text', text: s.system, label: '指示' });
+  if (s.doc) sys.push({ type: 'doc', text: DOC, label: '參考文件' });
+  sys.forEach((b, i) => blocks.push({ kind: 'sys', type: b.type, text: b.text, label: 'system[' + i + '] ' + (b.type === 'time' ? '現在時間' : b.label), key: 'S|' + b.type + '|' + b.text, tok: tokens(b.text) + 2 }));
+  const sysEnd = blocks.length - 1;
+  const msgs = [...state.convo, { role: 'user', text: s.msg }];
+  msgs.forEach((m, i) => blocks.push({ kind: 'msg', type: m.role, text: m.text, role: m.role, label: 'messages[' + i + '] ' + m.role, key: 'M|' + m.role + '|' + m.text, tok: tokens(m.text) + 4 }));
+  const msgEnd = blocks.length - 1;
+  const B = s.bp === 'tools' ? toolEnd : (s.bp === 'system' ? sysEnd : msgEnd);
+  return { blocks, B };
+}
+
+const sumTok = (blocks, a, b) => { let t = 0; for (let i = a; i <= b; i++) t += blocks[i].tok; return t; };
+
+function commonPrefix(blocks, refKeys) {
+  let i = 0;
+  while (i < blocks.length && i < refKeys.length && blocks[i].key === refKeys[i]) i++;
+  return i;
+}
+
+function evaluate(s, forceNow) {
+  const now = forceNow != null ? forceNow : state.clock + s.gap;
+  const { blocks, B } = buildBlocks(s, now);
+  const total = sumTok(blocks, 0, blocks.length - 1);
+  const prefix = B >= 0 ? sumTok(blocks, 0, B) : 0;
+  const st = blocks.map(() => 'after');
+  const tx = blocks.map(() => '');
+  const r = { now, blocks, B, total, prefix, st, tx, read: 0, create: 0, plain: total, hit: null, ref: null, reason: '', kind: 'miss', cacheable: true };
+
+  if (prefix < MIN_PREFIX) {
+    r.cacheable = false;
+    r.kind = 'short';
+    r.reason = '前綴不足 1,024 tokens（斷點前只有 ' + fmt(prefix) + '），不會建立快取';
+    blocks.forEach((b, i) => { if (i <= B) { st[i] = 'short'; tx[i] = '前綴太短，不快取'; } else tx[i] = '斷點之後，一般輸入'; });
+  } else {
+    const same = state.entries.filter(e => e.model === s.model);
+    const cands = same.filter(e => e.len <= B + 1 && commonPrefix(blocks, e.keys) >= e.len && now - e.last <= e.ttl);
+    const hit = cands.sort((a, b) => b.len - a.len)[0];
+    if (hit) {
+      r.hit = hit; r.ref = hit; r.kind = 'hit';
+      r.read = sumTok(blocks, 0, hit.len - 1);
+      r.create = hit.len - 1 < B ? sumTok(blocks, hit.len, B) : 0;
+      r.plain = total - r.read - r.create;
+      blocks.forEach((b, i) => {
+        if (i < hit.len) { st[i] = 'match'; tx[i] = '和快取相同，直接讀取（約 0.1 倍價）'; }
+        else if (i <= B) { st[i] = 'new'; tx[i] = '新內容，寫入快取'; }
+        else tx[i] = '斷點之後，一般輸入';
+      });
+      r.reason = '命中：前綴到「' + blocks[hit.len - 1].label + '」完全相同，讀取 ' + fmt(r.read) + ' tokens' + (r.create ? '，另外把新增的 ' + fmt(r.create) + ' tokens 寫入快取' : '') + '；快取重新計時 ' + ttlLabel(hit.ttl);
+    } else {
+      r.create = prefix;
+      r.plain = total - prefix;
+      const ref = same.length ? same.slice().sort((a, b) => b.last - a.last)[0] : [...state.entries].sort((a, b) => b.last - a.last)[0];
+      r.ref = ref || null;
+      const markNew = () => blocks.forEach((b, i) => { if (i <= B) { st[i] = 'new'; tx[i] = '寫入新的快取'; } else tx[i] = '斷點之後，一般輸入'; });
+      const breakAt = (c, why) => {
+        blocks.forEach((b, i) => {
+          if (i < c) { st[i] = 'match'; tx[i] = '和快取相同'; }
+          else if (i === c) { st[i] = 'break'; tx[i] = '這裡和快取不同：' + why; }
+          else { st[i] = 'dead'; tx[i] = '前面已經不同，即使這一塊內容一樣也不能重用'; }
+        });
+      };
+      if (!ref) {
+        r.reason = '第一次請求：快取是空的，把斷點前的前綴寫入快取';
+        markNew();
+      } else if (ref.model !== s.model) {
+        r.reason = '換了模型：快取按模型分開，無法共用';
+        breakAt(0, '模型從 ' + ref.model + ' 換成 ' + s.model);
+      } else {
+        const common = commonPrefix(blocks, ref.keys);
+        if (common >= ref.len) {
+          if (ref.len > B + 1) {
+            r.reason = '斷點位置和上次不同：這次斷點比上次的快取邊界更前面，沒有可讀的快取';
+            markNew();
+          } else {
+            const idle = Math.round(now - ref.last);
+            r.reason = '超過 ' + ttlLabel(ref.ttl) + ' TTL（距離上次使用 ' + idle + ' 分鐘），快取已過期，要重新寫入';
+            blocks.forEach((b, i) => {
+              if (i < ref.len) { st[i] = 'expired'; tx[i] = '內容相同，但快取已過期'; }
+              else if (i <= B) { st[i] = 'new'; tx[i] = '寫入新的快取'; }
+              else tx[i] = '斷點之後，一般輸入';
+            });
+          }
+        } else if (common > B) {
+          r.reason = '斷點位置和上次不同：上次沒有在這裡設快取邊界，找不到可讀的快取';
+          markNew();
+        } else {
+          const nb = blocks[common];
+          const ob = ref.kinds[common];
+          const cnt = bl => bl.filter(k => k === 'tool').length;
+          let why;
+          if (nb.kind === 'tool' || ob.kind === 'tool') {
+            const nt = blocks.filter(b => b.kind === 'tool').length;
+            const ot = cnt(ref.kinds.map(k => k.kind));
+            why = nt > ot ? '新增工具，整個快取失效' : (nt < ot ? '移除工具，整個快取失效' : '工具定義被改動，整個快取失效');
+          } else if (nb.kind === 'sys' || ob.kind === 'sys') {
+            if (nb.type === 'time' && ob.type === 'time') why = 'system 裡的時間戳記每次都不同';
+            else if (nb.type === 'time') why = 'system 多了時間戳記';
+            else if (ob.type === 'time') why = 'system 少了時間戳記（和上次不同）';
+            else why = 'system 內容被修改（文字或參考文件有增減）';
+          } else why = '歷史訊息被改動';
+          r.reason = why;
+          breakAt(common, why);
+        }
+      }
+    }
+  }
+
+  const f = MODEL_FACTOR[s.model];
+  const wp = s.ttl >= 60 ? PRICE.input * 2 : PRICE.cacheWrite;
+  const nextReply = REPLIES[state.qi % REPLIES.length];
+  r.reply = nextReply;
+  r.output = tokens(nextReply) + 30;
+  r.cost = f * (r.plain * PRICE.input + r.output * PRICE.output + r.read * PRICE.cacheRead + r.create * wp) / 1e6;
+  r.costNo = f * (total * PRICE.input + r.output * PRICE.output) / 1e6;
+  return r;
+}
+
+function commit(r, s) {
+  const ent = x => ({ model: s.model, ttl: s.ttl, last: r.now, len: x, keys: r.blocks.slice(0, x).map(b => b.key), kinds: r.blocks.slice(0, x).map(b => ({ kind: b.kind, type: b.type })), tok: sumTok(r.blocks, 0, x - 1) });
+  if (r.cacheable) {
+    if (r.hit) r.hit.last = r.now;
+    if (r.create > 0) state.entries.push(ent(r.B + 1));
+  }
+  state.history.push({
+    n: state.history.length + 1, time: clockStr(r.now), model: s.model, bp: s.bp, ttl: s.ttl,
+    read: r.read, create: r.create, plain: r.plain, cost: r.cost, costNo: r.costNo,
+    hit: r.read > 0, reason: r.reason
+  });
+  state.convo.push({ role: 'user', text: s.msg }, { role: 'assistant', text: r.reply });
+  state.clock = r.now;
+  state.qi++;
+}
+
+function hlCache(html) {
+  const lines = html.split('\n');
+  let on = false;
+  return lines.map(l => {
+    if (!on && l.includes('cache_control')) { on = true; }
+    if (on) {
+      const end = /^\s*\}/.test(l.replace(/<[^>]+>/g, ''));
+      if (end) on = false;
+      return '<span class="hl">' + l + '</span>';
+    }
+    return l;
+  }).join('\n');
+}
+
+const BP_LABEL = { tools: '工具之後', system: 'system 之後', msg: '最後一則訊息之後' };
+
+function requestObj(s, r) {
+  const cc = s.ttl >= 60 ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+  const tools = s.tools.map(n => ({ ...TOOLS[n] }));
+  if (s.bp === 'tools' && tools.length) tools[tools.length - 1] = { ...tools[tools.length - 1], cache_control: cc };
+  const system = r.blocks.filter(b => b.kind === 'sys').map(b => ({ type: 'text', text: b.text }));
+  if (s.bp === 'system' && system.length) system[system.length - 1] = { ...system[system.length - 1], cache_control: cc };
+  const msgs = r.blocks.filter(b => b.kind === 'msg').map(b => ({ role: b.role, content: [{ type: 'text', text: b.text }] }));
+  if (s.bp === 'msg') { const m = msgs[msgs.length - 1]; m.content[0] = { ...m.content[0], cache_control: cc }; }
+  return { model: s.model, max_tokens: 1024, ...(tools.length ? { tools } : {}), system, messages: msgs };
+}
+
+function render() {
+  const s = readCtl();
+  $('#gap-v').textContent = s.gap;
+  const r = evaluate(s);
+
+  $('#hint-clock').textContent = '送出時間 ' + clockStr(r.now);
+
+  // cached entries
+  const live = state.entries;
+  $('#entries').innerHTML = live.length ? live.map(e => {
+    const left = e.ttl - (r.now - e.last);
+    const ok = left >= 0;
+    return '<span class="chip ' + (ok ? 'accent' : 'bad') + '">' + esc(e.model) + '・前綴 ' + e.len + ' 塊／' + fmt(e.tok) + ' tokens・' + (ok ? '剩 ' + Math.round(left) + ' 分' : '已過期') + '</span>';
+  }).join('') : '<span class="muted small">（空的）</span>';
+
+  // blocks
+  let html = '';
+  let lastKind = '';
+  const names = { tool: '① tools', sys: '② system', msg: '③ messages' };
+  r.blocks.forEach((b, i) => {
+    if (b.kind !== lastKind) { html += '<div class="grp">' + names[b.kind] + '</div>'; lastKind = b.kind; }
+    html += '<div class="blk ' + r.st[i] + '"><span class="nm">' + esc(b.label) + '</span><span class="tk">' + fmt(b.tok) + ' tok</span><span class="tx">' + esc(r.tx[i]) + '</span></div>';
+    if (i === r.B) html += '<div class="bp">▲ cache_control 斷點（' + BP_LABEL[s.bp] + '，TTL ' + ttlLabel(s.ttl) + '）</div>';
+  });
+  if (r.B < 0) html = '<div class="note warn">目前沒有任何工具，「工具之後」沒有地方可放斷點。</div>' + html;
+  $('#blocks').innerHTML = html;
+
+  const v = $('#verdict');
+  v.className = 'note ' + (r.kind === 'hit' ? 'ok' : 'warn');
+  v.innerHTML = '<span class="chip ' + (r.kind === 'hit' ? 'ok' : 'warn') + '">' + (r.kind === 'hit' ? '命中' : '未命中') + '</span> ' + esc(r.reason);
+
+  bar($('#bar'), [
+    { label: 'cache_read', value: r.read, color: 'var(--seg-cache)' },
+    { label: 'cache_creation', value: r.create, color: 'var(--seg-attach)' },
+    { label: 'input（一般）', value: r.plain, color: 'var(--seg-user)' }
+  ].filter(x => x.value > 0));
+  $('#s-cost').textContent = usd(r.cost);
+  $('#s-no').textContent = usd(r.costNo);
+  const pct = Math.round((r.cost / r.costNo - 1) * 100);
+  $('#s-save').textContent = (pct > 0 ? '+' : '') + pct + '%';
+
+  if (state.view === 'req') {
+    $('#json-title').textContent = 'Request（長文字縮短顯示，高亮處是 cache_control）';
+    $('#json').innerHTML = hlCache(jsonHTML(requestObj(s, r), { clip: 60 }));
+  } else {
+    $('#json-title').textContent = 'Response（usage 欄位，示意）';
+    $('#json').innerHTML = jsonHTML({
+      id: 'msg_01Abc…', type: 'message', role: 'assistant', model: s.model,
+      content: [{ type: 'text', text: r.reply }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: r.plain, cache_creation_input_tokens: r.create, cache_read_input_tokens: r.read, output_tokens: r.output }
+    }, { clip: 60 });
+  }
+  renderHistory();
+}
+
+function renderHistory() {
+  const h = state.history;
+  if (!h.length) { $('#history').innerHTML = '<p class="small muted" style="margin:0">還沒有送出任何請求。</p>'; return; }
+  $('#history').innerHTML = '<table><thead><tr><th>#</th><th>時間</th><th>結果</th><th class="num">讀取</th><th class="num">寫入</th><th class="num">一般</th><th class="num">費用</th><th class="num">無快取</th><th>原因</th></tr></thead><tbody>' +
+    h.map((x, i) => '<tr class="' + (i === h.length - 1 ? 'last' : '') + '"><td>' + x.n + '</td><td class="num">' + x.time + '</td><td>' +
+      (x.hit ? '<span class="chip ok">命中</span>' : '<span class="chip warn">未命中</span>') + '</td><td class="num">' + fmt(x.read) + '</td><td class="num">' + fmt(x.create) + '</td><td class="num">' + fmt(x.plain) + '</td><td class="num">' + usd(x.cost) + '</td><td class="num">' + usd(x.costNo) + '</td><td class="reason small">' + esc(x.reason) + '<br><span class="muted">' + esc(x.model) + '・' + BP_LABEL[x.bp] + '・' + ttlLabel(x.ttl) + '</span></td></tr>').join('') +
+    '</tbody></table>';
+}
+
+function setDefaults() {
+  $('#system').value = DEFAULT_SYSTEM;
+  $('#doc').checked = true;
+  $('#time').checked = false;
+  $('#model').value = 'claude-sonnet-x';
+  $('#gap').value = 3;
+  state.tools = { Read: true, Bash: true, Edit: true, Grep: false };
+  state.ttl = 5; state.bp = 'msg';
+  syncToggles();
+}
+
+function syncToggles() {
+  $$('#tools .btn').forEach(b => b.setAttribute('aria-pressed', !!state.tools[b.dataset.tool]));
+  $$('#ttl button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.ttl === state.ttl));
+  $$('#bp button').forEach(b => b.setAttribute('aria-pressed', b.dataset.bp === state.bp));
+}
+
+function start() {
+  state.entries = []; state.history = []; state.convo = []; state.clock = 0; state.qi = 0;
+  setDefaults();
+  $('#msg').value = QUESTIONS[0];
+  const s = readCtl();
+  commit(evaluate(s, 0), s); // pre-sent request #1 at 09:00
+  $('#msg').value = QUESTIONS[state.qi % QUESTIONS.length];
+  render();
+}
+
+$('#tools').innerHTML = Object.keys(TOOLS).map(k => '<button type="button" class="btn" data-tool="' + k + '" aria-pressed="false">' + esc(TOOL_DESC[k]) + '</button>').join('');
+$$('#tools .btn').forEach(b => b.addEventListener('click', () => { state.tools[b.dataset.tool] = !state.tools[b.dataset.tool]; syncToggles(); render(); }));
+$$('#ttl button').forEach(b => b.addEventListener('click', () => { state.ttl = +b.dataset.ttl; syncToggles(); render(); }));
+$$('#bp button').forEach(b => b.addEventListener('click', () => { state.bp = b.dataset.bp; syncToggles(); render(); }));
+$$('[data-view]').forEach(b => b.addEventListener('click', () => {
+  state.view = b.dataset.view;
+  $$('[data-view]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  render();
+}));
+$$('textarea, input, select').forEach(el => { el.addEventListener('input', render); el.addEventListener('change', render); });
+$('#send').addEventListener('click', () => {
+  const s = readCtl();
+  commit(evaluate(s), s);
+  $('#msg').value = QUESTIONS[state.qi % QUESTIONS.length];
+  render();
+});
+$('#reset').addEventListener('click', start);
+
+start();
+</script>
+</body>
+</html>

@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>測試有效性實驗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .pane.out { position: static; }
+  #src { padding: 8px 0; }
+  .cl { display: block; min-width: max-content; padding-right: 10px; }
+  .cl .gn { display: inline-block; width: 2.4em; text-align: right; padding-right: 8px; margin-right: 8px; color: var(--muted); border-right: 1px solid var(--line); user-select: none; }
+  .cl.cov { box-shadow: inset 3px 0 var(--ok); }
+  .cl.unc { box-shadow: inset 3px 0 var(--bad); background: var(--bad-soft); }
+  .cl.msel { background: var(--warn-soft); outline: 1px solid var(--warn); outline-offset: -1px; }
+  .tst { border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); padding: 6px 10px; min-width: 0; }
+  .tst + .tst { margin-top: 6px; }
+  .tst .check span { overflow-wrap: anywhere; font-family: var(--f-mono); font-size: 12.5px; }
+  .tst details { margin: 4px 0 2px 24px; }
+  .tst summary { font-size: 12.5px; color: var(--accent); cursor: pointer; }
+  .tst pre.code { margin-top: 6px; max-height: 260px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .big { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 420px) { .big { grid-template-columns: minmax(0, 1fr); } }
+  .meter { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); min-width: 0; }
+  .meter .v { font-family: var(--f-mono); font-size: 32px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .meter .l { font-size: 13px; font-weight: 500; }
+  .meter .s { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .meter.cov .v { color: var(--ok); }
+  .meter.mut .v { color: var(--bad); }
+  .meter.mut.good .v { color: var(--ok); }
+  .stale { opacity: .55; }
+  .mx th button { all: unset; cursor: pointer; color: var(--accent); font-size: 12.5px; white-space: nowrap; border-radius: 4px; padding: 0 2px; }
+  .mx th button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mx th button[aria-pressed="true"] { background: var(--warn-soft); color: var(--warn); }
+  .mx td.c { text-align: center; }
+  .mx tr.off td, .mx tr.off th { opacity: .4; }
+  .mx td.nm { font-family: var(--f-mono); font-size: 12px; white-space: nowrap; }
+  .runs { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; }
+  .run { text-align: center; border-radius: 6px; padding: 2px 0; font-size: 11px; line-height: 1.3; background: var(--code-bg); color: var(--muted); min-width: 0; }
+  .run b { display: block; font-family: var(--f-mono); font-size: 13px; font-weight: 500; }
+  .run.p { background: var(--ok-soft); color: var(--ok); }
+  .run.f { background: var(--bad-soft); color: var(--bad); }
+  .vd { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 9px 12px; display: grid; gap: 4px; font-size: 13.5px; min-width: 0; }
+  .vd + .vd { margin-top: 8px; }
+  .vd .t { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+  .vd .t code { font-size: 12.5px; }
+  .vd.off { opacity: .5; }
+  .cmp { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 420px) { .cmp { grid-template-columns: minmax(0, 1fr); } }
+  .cmp .meter .v { font-size: 22px; }
+  .mdiff { font-family: var(--f-mono); font-size: 12.5px; display: grid; gap: 2px; overflow-x: auto; }
+  .mdiff div { white-space: pre; }
+  .mdiff .o { background: var(--bad-soft); }
+  .mdiff .n { background: var(--ok-soft); }
+</style>
+</head>
+<body>
+<div class="wrap crumb"><a href="index.html">← Agent 實驗室</a></div>
+<header class="wrap page-head">
+  <div class="qref"><span>課程 11</span><span>面試 13</span></div>
+  <h1>測試有效性實驗</h1>
+  <p class="lede">左邊選擇要納入的 xUnit 測試，右邊比較「覆蓋率」與「變異分數」：覆蓋率只告訴你程式有沒有被執行到，變異測試才會問「把程式改錯，測試會不會失敗」。你會看到哪些測試只是在刷數字。</p>
+</header>
+
+<main class="wrap lab">
+  <section class="pane">
+    <header><h2>被測程式與測試</h2><span class="hint">勾選要納入的測試</span></header>
+    <div class="body">
+      <div class="field">
+        <span class="label">被測方法 CalcDiscount</span>
+        <pre class="code" id="src" tabindex="0" aria-label="被測方法原始碼"></pre>
+        <span class="sub">跑覆蓋率後，左側色條：綠＝有被執行、紅＝沒有。點右邊矩陣的變異標題，會標出被改動的那一行。</span>
+      </div>
+
+      <div class="field">
+        <span class="label" id="tl">xUnit 測試（7 個）</span>
+        <div id="tests" role="group" aria-labelledby="tl"></div>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="b-cov" type="button">跑覆蓋率</button>
+        <button class="btn primary" id="b-mut" type="button">跑變異測試</button>
+        <button class="btn primary" id="b-flk" type="button">重跑 20 次找 flaky</button>
+      </div>
+      <div class="row">
+        <button class="btn" id="b-all" type="button">全部納入</button>
+        <button class="btn" id="b-good" type="button">只留有效測試</button>
+        <button class="btn" id="b-bad" type="button">只留無效測試</button>
+      </div>
+      <p class="disclaimer">這是教學用的模擬：覆蓋行數與「哪個測試殺死哪個變異」是依每個測試的程式碼預先推演、結果固定；真實專案請用 coverlet 量覆蓋率、Stryker.NET 做變異測試。</p>
+    </div>
+  </section>
+
+  <section class="pane out" aria-live="polite">
+    <header><h2>測試到底有沒有用</h2><span class="hint" id="status"></span></header>
+    <div class="body">
+      <div class="tabs" role="group" aria-label="切換顯示" id="tabs">
+        <button type="button" class="btn" data-view="cm" aria-pressed="true">覆蓋率 vs 變異</button>
+        <button type="button" class="btn" data-view="fl" aria-pressed="false">Flaky</button>
+        <button type="button" class="btn" data-view="vd" aria-pressed="false">逐一判定</button>
+        <button type="button" class="btn" data-view="cp" aria-pressed="false">刪掉無效測試</button>
+      </div>
+      <div id="out" class="body" style="padding:0"></div>
+    </div>
+  </section>
+</main>
+
+<section class="wrap takeaways">
+  <div class="box">
+    <h2>看完要記得</h2>
+    <ul>
+      <li><strong>覆蓋率只代表「有執行到」</strong>，不代表「有驗證」：沒有斷言的測試也能把覆蓋率衝到 100%。</li>
+      <li><strong>變異測試看「改錯會不會失敗」</strong>：故意把程式改壞（變異），存活的變異就是測試的盲點。.NET 用 Stryker.NET。</li>
+      <li><strong>時間、亂數、外部呼叫要可注入</strong>：DateTime.Now 換成 TimeProvider／IClock，測試才會每次結果一樣。</li>
+      <li><strong>驗行為，不驗實作細節</strong>：檢查回傳值與可觀察的結果，不要斷言內部呼叫順序，否則重構一下就全紅。</li>
+      <li><strong>沒價值的測試可以刪</strong>：它們不提高信心，只增加執行時間與維護成本；刪掉後變異分數不會下降。</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="wrap pager" aria-label="上一題與下一題"><a class="pg prev" href="review.html"><span>← 上一題</span><b>Code Review Skill</b></a><a class="pg next" href="habits.html"><span>下一題 →</span><b>開發習慣</b></a></nav>
+
+<script src="common.js"></script>
+<script>
+const { esc, $, $$ } = Lab;
+
+const SRC = [
+  'public decimal CalcDiscount(decimal amount, bool isVip, DateTime now)',
+  '{',
+  '    var price = amount;',
+  '    if (isVip)',
+  '        price = price * 0.9m;                    // VIP 9 折',
+  '    if (amount >= 1000m)',
+  '        price -= 50m;                            // 滿 1000 再折 50',
+  '    var start = new DateTime(now.Year, 11, 1);',
+  '    var end   = new DateTime(now.Year, 11, 8);   // 週年慶 11/1 ~ 11/7',
+  '    if (now >= start && now < end)',
+  '        price = price * 0.95m;                   // 週年慶 95 折',
+  '    return price < 0 ? 0 : price;',
+  '}'
+];
+const EXEC = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+const MUTANTS = [
+  { id: 'M1', label: '>= → >', line: 6, from: 'if (amount >= 1000m)', to: 'if (amount > 1000m)' },
+  { id: 'M2', label: '0.9m → 0.8m', line: 5, from: 'price = price * 0.9m;', to: 'price = price * 0.8m;' },
+  { id: 'M3', label: '刪掉滿額折扣', line: 7, from: 'price -= 50m;', to: '（整行刪除）' },
+  { id: 'M4', label: '週年慶邊界 +1 天', line: 9, from: 'new DateTime(now.Year, 11, 8)', to: 'new DateTime(now.Year, 11, 9)' },
+  { id: 'M5', label: 'return 0', line: 12, from: 'return price < 0 ? 0 : price;', to: 'return 0;' },
+  { id: 'M6', label: '起點 >= → >', line: 10, from: 'if (now >= start && now < end)', to: 'if (now > start && now < end)' },
+  { id: 'M7', label: '週年慶改用原價', line: 11, from: 'price = price * 0.95m;', to: 'price = amount * 0.95m;' },
+  { id: 'M8', label: '0.95m → 0.96m', line: 11, from: 'price = price * 0.95m;', to: 'price = price * 0.96m;' }
+];
+
+const TESTS = [
+  { id: 'T1', name: 'Vip_AtThreshold_AppliesBothDiscounts', lines: [3, 4, 5, 6, 7, 8, 9, 10, 12], kills: ['M1', 'M2', 'M3', 'M5'],
+    cls: '有效', tone: 'ok', act: '保留',
+    why: '對邊界值（剛好 1000、999.99）做精確金額斷言，改動折數、門檻或刪掉折扣都會失敗。',
+    code: `[Fact]
+public void Vip_AtThreshold_AppliesBothDiscounts()
+{
+    var d = new DateTime(2025, 3, 10);
+    Assert.Equal(850m, CalcDiscount(1000m, true, d));
+    Assert.Equal(999.99m, CalcDiscount(999.99m, false, d));
+}` },
+  { id: 'T2', name: 'Anniversary_EndBoundary_IsExclusive', lines: [3, 4, 6, 8, 9, 10, 11, 12], kills: ['M4', 'M5'],
+    cls: '有效', tone: 'ok', act: '保留，並補精確金額斷言',
+    why: '抓得到週年慶結束日的邊界，但只比大小；0.95 改成 0.96、或起點邊界寫錯都放過，建議改成斷言 190m／200m 並補 11/1 00:00。',
+    code: `[Fact]
+public void Anniversary_EndBoundary_IsExclusive()
+{
+    var inside  = CalcDiscount(200m, false, new DateTime(2025, 11, 7, 23, 59, 59));
+    var outside = CalcDiscount(200m, false, new DateTime(2025, 11, 8));
+    Assert.True(inside < outside);
+}` },
+  { id: 'T3', name: 'Vip_Order_Runs', lines: [3, 4, 5, 6, 7, 8, 9, 10, 12], kills: [],
+    cls: '無效（無斷言）', tone: 'bad', act: '補斷言（或直接刪除）',
+    why: '只呼叫、只印出結果，永遠是綠的；它貢獻覆蓋率卻不驗證任何事。',
+    code: `[Fact]
+public void Vip_Order_Runs()
+{
+    var r = CalcDiscount(1500m, true, new DateTime(2025, 3, 10));
+    Console.WriteLine(r);
+}` },
+  { id: 'T4', name: 'Returns_Something', lines: [3, 4, 6, 8, 9, 10, 12], kills: [],
+    cls: '假陽性', tone: 'bad', act: '補斷言（Assert.Equal 預期金額）',
+    why: 'decimal 是實值型別，Assert.NotNull 永遠成立；方法回傳 0 或任何數字都會過。',
+    code: `[Fact]
+public void Returns_Something()
+{
+    var r = CalcDiscount(500m, false, new DateTime(2025, 3, 10));
+    Assert.NotNull(r);
+}` },
+  { id: 'T5', name: 'Vip_Discount_IsCorrect', lines: [3, 4, 5, 6, 7, 8, 9, 10, 12], kills: [],
+    cls: '假陽性', tone: 'bad', act: '刪除 try/catch，讓失敗真的失敗',
+    why: '預期值其實寫錯了（1200 的 VIP 價是 1030），斷言失敗卻被 catch 吞掉，測試永遠綠，還給人「已驗證」的錯覺。',
+    code: `[Fact]
+public void Vip_Discount_IsCorrect()
+{
+    try
+    {
+        Assert.Equal(1000m, CalcDiscount(1200m, true, new DateTime(2025, 3, 10)));
+    }
+    catch (Exception) { /* 先吞掉，之後再看 */ }
+}` },
+  { id: 'T6', name: 'Normal_Order_HasNoDiscount', lines: [3, 4, 6, 8, 9, 10, 12], kills: ['M5'],
+    cls: '脆弱（flaky）', tone: 'warn', act: '注入時間（TimeProvider／IClock）',
+    why: '用 DateTime.Now：平常日是綠的，只要剛好在 11/1～11/7 跑就會紅。結果取決於哪天執行，不是程式有沒有錯。',
+    code: `[Fact]
+public void Normal_Order_HasNoDiscount()
+{
+    var r = CalcDiscount(200m, false, DateTime.Now);
+    Assert.Equal(200m, r);
+}` },
+  { id: 'T7', name: 'Checkout_CallsRulesInOrder', lines: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12], kills: [],
+    cls: '過度耦合', tone: 'warn', act: '改驗行為（斷言結帳金額）',
+    why: '驗證的是「內部先呼叫誰、後呼叫誰」，從不檢查金額；重構內部順序會全紅，把折扣算錯卻不會失敗。',
+    code: `[Fact]
+public void Checkout_CallsRulesInOrder()
+{
+    var seq = new MockSequence();
+    var inv = new Mock<IInventory>(MockBehavior.Strict);
+    var log = new Mock<IAuditLog>(MockBehavior.Strict);
+    inv.InSequence(seq).Setup(i => i.Reserve(It.IsAny<int>()));
+    log.InSequence(seq).Setup(l => l.Write("discount-applied"));
+
+    new CheckoutService(log.Object, inv.Object)
+        .Checkout(2000m, true, new DateTime(2025, 11, 3)); // 內部呼叫 CalcDiscount
+
+    inv.Verify(i => i.Reserve(It.IsAny<int>()), Times.Once);
+    log.Verify(l => l.Write("discount-applied"), Times.Once);
+}` }
+];
+const T = Object.fromEntries(TESTS.map(t => [t.id, t]));
+const GOOD = TESTS.filter(t => t.cls === '有效').map(t => t.id);
+
+// ---- deterministic simulation
+const covOf = ids => { const s = new Set(); ids.forEach(i => T[i].lines.forEach(l => s.add(l))); return s; };
+const covPct = ids => Math.round(covOf(ids).size / EXEC.length * 100);
+const killedOf = ids => { const m = {}; MUTANTS.forEach(x => { m[x.id] = ids.filter(i => T[i].kills.includes(x.id)); }); return m; };
+const mutPct = ids => { const k = killedOf(ids); return Math.round(MUTANTS.filter(x => k[x.id].length).length / MUTANTS.length * 100); };
+const DATES = Array.from({ length: 20 }, (_, i) => i < 9 ? [10, 23 + i] : [11, i - 8]);   // 10/23 .. 11/11
+const runPass = (id, i) => id !== 'T6' || !(DATES[i][0] === 11 && DATES[i][1] <= 7);
+const key = ids => ids.join(',');
+
+const state = { sel: new Set(TESTS.map(t => t.id)), view: 'cm', mut: null, snap: {}, busy: {}, prog: 20 };
+const ids = () => TESTS.map(t => t.id).filter(i => state.sel.has(i));
+const takeSnap = k => { const a = ids(); state.snap[k] = { key: key(a), ids: a }; };
+['cov', 'mut', 'flk'].forEach(takeSnap);
+
+function stale(k) { return !state.snap[k] || state.snap[k].key !== key(ids()); }
+
+// ---- left pane
+function renderSrc() {
+  const sc = state.snap.cov, cov = covOf(sc.ids), m = state.mut && MUTANTS.find(x => x.id === state.mut);
+  $('#src').innerHTML = SRC.map((t, i) => {
+    const n = i + 1;
+    let c = 'cl';
+    if (EXEC.includes(n)) c += cov.has(n) ? ' cov' : ' unc';
+    if (m && m.line === n) c += ' msel';
+    return `<span class="${c}"><span class="gn">${n}</span>${esc(t)}</span>`;
+  }).join('');
+}
+function buildTests() {
+  $('#tests').innerHTML = TESTS.map(t => `<div class="tst"><label class="check"><input type="checkbox" value="${t.id}" checked> <span>${esc(t.id)} ${esc(t.name)}</span></label>
+    <details><summary>看測試程式碼</summary><pre class="code" tabindex="0">${esc(t.code)}</pre></details></div>`).join('');
+}
+
+// ---- right pane
+const staleChip = k => stale(k) ? '<span class="chip warn">設定已變更，請重跑</span>' : '';
+
+function viewCM() {
+  const sc = state.snap.cov, sm = state.snap.mut;
+  const cp = covPct(sc.ids), mp = mutPct(sm.ids), km = killedOf(sm.ids);
+  const surv = MUTANTS.filter(x => !km[x.id].length);
+  const head = MUTANTS.map(x => `<th scope="col"><button type="button" data-m="${x.id}" aria-pressed="${state.mut === x.id}" title="${esc(x.from)} → ${esc(x.to)}">${x.id} ${esc(x.label)}</button></th>`).join('');
+  const rows = TESTS.map(t => {
+    const inSnap = sm.ids.includes(t.id);
+    return `<tr class="${inSnap ? '' : 'off'}"><td class="nm">${t.id}</td>${MUTANTS.map(x => `<td class="c">${inSnap && t.kills.includes(x.id) ? '<span class="chip ok">殺死</span>' : '<span class="muted" aria-label="沒抓到">–</span>'}</td>`).join('')}</tr>`;
+  }).join('');
+  const foot = `<tr><th scope="row">結果</th>${MUTANTS.map(x => `<td class="c">${km[x.id].length ? '<span class="chip ok">已殺死</span>' : '<span class="chip bad">存活</span>'}</td>`).join('')}</tr>`;
+  let note;
+  if (!sm.ids.length) note = '<div class="note">沒有納入任何測試。</div>';
+  else if (cp - mp >= 20) note = `<div class="note bad">覆蓋率 <strong>${cp}%</strong> 看起來很安全，變異分數卻只有 <strong>${mp}%</strong>：<strong>${surv.length}</strong> 個「被改錯的版本」沒有任何測試察覺。覆蓋率高不代表測試有效。</div>`;
+  else if (mp >= 60 && surv.length) note = `<div class="note warn">變異分數 ${mp}%：仍有 ${surv.length} 個存活（${surv.map(x => x.id).join('、')}），表示這些改動測試仍抓不到，可針對它們補斷言。</div>`;
+  else note = `<div class="note ok">覆蓋率 ${cp}%、變異分數 ${mp}%，兩個數字接近，測試大致可信。</div>`;
+  const m = state.mut && MUTANTS.find(x => x.id === state.mut);
+  const md = m ? `<div class="mdiff" aria-label="變異內容"><div class="o">- ${esc(m.from)}</div><div class="n">+ ${esc(m.to)}</div></div>` : '<div class="small muted">點矩陣的變異標題（M1…M8）看它改了哪一行。</div>';
+  return `<div class="big">
+      <div class="meter cov ${stale('cov') ? 'stale' : ''}"><div class="l">行覆蓋率 ${staleChip('cov')}</div><div class="s">有被執行到的比例</div><div class="v">${cp}%</div><div class="tbar" role="img" aria-label="覆蓋率 ${cp}%"><i style="width:${cp}%;background:var(--ok)"></i></div></div>
+      <div class="meter mut ${mp >= 80 ? 'good' : ''} ${stale('mut') ? 'stale' : ''}"><div class="l">變異分數 ${staleChip('mut')}</div><div class="s">${MUTANTS.length} 個變異中被測試殺死的比例</div><div class="v">${mp}%</div><div class="tbar" role="img" aria-label="變異分數 ${mp}%"><i style="width:${mp}%;background:var(--bad)"></i></div></div>
+    </div>${note}
+    <div class="tbl mx"><table><caption class="small muted" style="text-align:left;padding-bottom:4px">殺死矩陣：哪個測試抓得到哪個變異</caption><thead><tr><th scope="col">測試</th>${head}</tr></thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>
+    ${md}
+    <div class="note">真實的 .NET 專案用 <strong>Stryker.NET</strong>：<code>dotnet tool install -g dotnet-stryker</code>，在測試專案執行 <code>dotnet stryker</code>，會自動產生變異並輸出 HTML 報告（Killed／Survived／No coverage／Timeout）。</div>`;
+}
+
+function viewFL() {
+  const sf = state.snap.flk, has = sf.ids.includes('T6'), n = state.prog;
+  if (!has) return `<div class="note">${staleChip('flk')} 目前納入的測試裡沒有 DateTime.Now 的那一個（T6）。20 次結果全綠，不代表沒有風險，只是這次沒選到。</div>`;
+  const fails = DATES.reduce((a, _, i) => a + (runPass('T6', i) ? 0 : 1), 0);
+  const done = n >= 20;
+  const cells = DATES.map(([m, d], i) => {
+    const shown = i < n, p = runPass('T6', i);
+    return `<div class="run ${shown ? (p ? 'p' : 'f') : ''}" aria-label="第 ${i + 1} 次 ${m}/${d} ${shown ? (p ? '通過' : '失敗') : '尚未執行'}"><b>${shown ? (p ? '✓' : '✗') : '·'}</b>${m}/${d}</div>`;
+  }).join('');
+  const others = sf.ids.filter(i => i !== 'T6');
+  return `<div>${staleChip('flk')}<div class="small muted" style="margin:4px 0 6px">T6 <code>Normal_Order_HasNoDiscount</code>（使用 DateTime.Now）：把系統日期從 10/23 逐日往後，模擬 20 次執行。</div><div class="runs">${cells}</div></div>
+    ${done ? `<div class="stats"><div class="stat"><div class="v">${20 - fails}／20</div><div class="l">通過</div></div><div class="stat"><div class="v">${fails}</div><div class="l">失敗（11/1～11/7）</div></div></div>
+    <div class="note warn">程式沒有改，結果卻是 ${fails} 天紅燈：這是 <strong>flaky</strong>。修法是把時間注入：<code>CalcDiscount(200m, false, new DateTime(2025, 3, 10))</code>，或 .NET 8 的 <code>TimeProvider</code> + <code>FakeTimeProvider</code>。</div>
+    <div class="note">${others.length ? `其他 ${others.length} 個納入的測試 20／20 全綠；注意 T5 雖然全綠，其實預期值是錯的，被 catch 吞掉了，穩定不等於正確。` : '沒有其他測試納入。'}</div>`
+    : '<div class="note">執行中…</div>'}`;
+}
+
+function viewVD() {
+  return TESTS.map(t => {
+    const on = state.sel.has(t.id), k = t.kills.length;
+    return `<div class="vd ${on ? '' : 'off'}"><div class="t"><code>${t.id}</code><span class="chip ${t.tone}">${esc(t.cls)}</span><span class="chip accent">建議：${esc(t.act)}</span>${on ? '' : '<span class="chip">未納入</span>'}</div>
+      <div class="small muted"><code>${esc(t.name)}</code>　實測：殺死 ${k}／${MUTANTS.length} 個變異</div><div>${esc(t.why)}</div></div>`;
+  }).join('');
+}
+
+function viewCP() {
+  const all = TESTS.map(t => t.id);
+  const mk = (title, a, sub) => `<div class="meter"><div class="l">${title}</div><div class="s">${sub}</div>
+    <div class="stats" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+    <div class="stat"><div class="v">${a.length}</div><div class="l">測試數</div></div>
+    <div class="stat"><div class="v">${covPct(a)}%</div><div class="l">覆蓋率</div></div>
+    <div class="stat"><div class="v">${mutPct(a)}%</div><div class="l">變異分數</div></div>
+    <div class="stat"><div class="v">${a.includes('T6') ? '7 天紅' : '0'}</div><div class="l">flaky 風險</div></div></div></div>`;
+  const dc = covPct(all) - covPct(GOOD), dm = mutPct(all) - mutPct(GOOD);
+  return `<div class="cmp">${mk('全部 7 個測試', all, '含 5 個沒價值的')}${mk('只留 2 個有效測試', GOOD, T1T2())}</div>
+    <div class="note ok">刪掉 ${all.length - GOOD.length} 個測試後：覆蓋率 ${dc === 0 ? '不變' : '少 ' + dc + ' 個百分點'}、變異分數 ${dm === 0 ? '不變' : '少 ' + dm + ' 個百分點'}，但測試數從 ${all.length} 降到 ${GOOD.length}，flaky 與維護成本一起消失。</div>
+    <div class="note">真正該做的不是衝覆蓋率，而是補上讓存活變異（M6、M7、M8）失敗的斷言：起點 11/1 00:00、VIP 加週年慶疊加金額、精確的 0.95 折。</div>`;
+}
+function T1T2() { return 'T1、T2'; }
+
+function render() {
+  renderSrc();
+  $$('#tabs [data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === state.view));
+  $$('#tests input').forEach(i => { i.checked = state.sel.has(i.value); });
+  $('#out').innerHTML = { cm: viewCM, fl: viewFL, vd: viewVD, cp: viewCP }[state.view]();
+  const n = ids().length;
+  $('#status').textContent = `已納入 ${n}／${TESTS.length} 個測試`;
+  [['cov', '#b-cov', '跑覆蓋率'], ['mut', '#b-mut', '跑變異測試'], ['flk', '#b-flk', '重跑 20 次找 flaky']].forEach(([k, s, t]) => {
+    const b = $(s); b.disabled = !!state.busy[k]; b.textContent = state.busy[k] ? '執行中…' : t;
+  });
+}
+
+// ---- events
+buildTests();
+$('#tests').addEventListener('change', e => {
+  if (e.target.checked) state.sel.add(e.target.value); else state.sel.delete(e.target.value);
+  render();
+});
+$('#tabs').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) { state.view = b.dataset.view; render(); } });
+$('#out').addEventListener('click', e => {
+  const b = e.target.closest('[data-m]');
+  if (b) { state.mut = state.mut === b.dataset.m ? null : b.dataset.m; render(); }
+});
+function setSel(a) { state.sel = new Set(a); render(); }
+$('#b-all').addEventListener('click', () => setSel(TESTS.map(t => t.id)));
+$('#b-good').addEventListener('click', () => setSel(GOOD));
+$('#b-bad').addEventListener('click', () => setSel(TESTS.map(t => t.id).filter(i => !GOOD.includes(i))));
+
+function runSlow(k, view, ms) {
+  if (state.busy[k]) return;
+  state.busy[k] = true; state.view = view; render();
+  setTimeout(() => { takeSnap(k); state.busy[k] = false; render(); }, ms);
+}
+$('#b-cov').addEventListener('click', () => runSlow('cov', 'cm', 600));
+$('#b-mut').addEventListener('click', () => runSlow('mut', 'cm', 900));
+let ft = null;
+$('#b-flk').addEventListener('click', () => {
+  if (state.busy.flk) return;
+  state.busy.flk = true; state.view = 'fl'; state.prog = 0; takeSnap('flk'); render();
+  clearInterval(ft);
+  ft = setInterval(() => {
+    state.prog++;
+    if (state.prog >= 20) { clearInterval(ft); state.busy.flk = false; }
+    render();
+  }, 70);
+});
+
+render();
+</script>
+</body>
+</html>
