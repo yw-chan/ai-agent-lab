@@ -82,6 +82,9 @@ a { color: var(--accent); }
 .pane > header h2 { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: .02em; }
 .pane > header .hint { font-size: 12px; color: var(--muted); }
 .pane .body { padding: 14px; display: grid; gap: 14px; min-width: 0; }
+/* one shrinkable column: a wide child must scroll or wrap inside, never stretch the pane */
+.pane .body { grid-template-columns: minmax(0, 1fr); }
+.pane .body > * { min-width: 0; max-width: 100%; }
 .pane.out { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
 @media (max-width: 900px) { .pane.out { position: static; } }
 
